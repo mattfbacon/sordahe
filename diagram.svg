@@ -878,10 +878,10 @@
        cy="148.80719"
        r="25.604313" />
     <circle
-       style="fill:none;stroke:#f4dd8a;stroke-width:3.26929;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers;stop-color:#000000;stroke-opacity:1"
+       style="fill:none;stroke:#f4dd8a;stroke-width:3.26929;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1;paint-order:stroke fill markers;stop-color:#000000"
        id="path612"
-       cx="492.89255"
-       cy="150.73752"
+       cx="434.0484"
+       cy="151.60498"
        r="23.950422" />
   </g>
 </svg>
