@@ -119,7 +119,11 @@ impl App {
 				EntryPart::SpecialPunct(punct) => {
 					buf += punct.as_str();
 					self.state.space = true;
-					self.state.caps = Some(punct.is_sentence_end());
+					self.state.caps = if punct.is_sentence_end() {
+						Some(true)
+					} else {
+						None
+					};
 				}
 				EntryPart::SetCaps(set) => {
 					self.state.caps = Some(*set);
