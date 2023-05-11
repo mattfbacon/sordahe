@@ -24,6 +24,7 @@ const BACKLOG_DEPTH: usize = 16;
 struct InputState {
 	caps: Option<bool>,
 	space: bool,
+	prev_was_glue: bool,
 }
 
 #[derive(Debug)]
@@ -44,6 +45,7 @@ struct App {
 	backlog: VecDeque<InputEvent>,
 }
 
+#[derive(Debug)]
 struct Action {
 	entry: Entry,
 	strokes: Strokes,
@@ -67,7 +69,6 @@ impl App {
 		}
 
 		let action = self.find_action(keys);
-
 		let Some(Action {
 			entry,
 			strokes,
@@ -85,43 +86,38 @@ impl App {
 		self.delete(to_delete);
 
 		let state_before = self.state;
-		let mut send_ = Some(|text: String| {
-			self
-				.backlog
-				.drain(..self.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
-			self.backlog.push_back(InputEvent {
-				strokes,
-				len: text.len(),
-				state_before,
-			});
-			self.input.commit_string(text);
-		});
-		let mut send = |text| send_.take().expect("you gotta actually implement it now")(text);
+
+		let mut buf = String::new();
 
 		for part in &*entry.0 {
 			match part {
 				EntryPart::Verbatim(text) => {
-					let mut text = if self.state.space {
-						[" ", text].concat()
-					} else {
-						text.clone().into()
-					};
+					if self.state.space {
+						buf += " ";
+					}
+
+					let first_pos = buf.len();
+					buf += text;
+
 					if let Some(caps) = self.state.caps {
-						if let Some((first_pos, first)) = text.char_indices().find(|(_, ch)| *ch != ' ') {
-							let first = &mut text[first_pos..][..first.len_utf8()];
-							if caps {
-								first.make_ascii_uppercase();
-							} else {
-								first.make_ascii_lowercase();
-							}
+						let first_len = buf[first_pos..]
+							.chars()
+							.next()
+							.map_or(0, |ch| ch.len_utf8());
+						let first = &mut buf[first_pos..][..first_len];
+
+						if caps {
+							first.make_ascii_uppercase();
+						} else {
+							first.make_ascii_lowercase();
 						}
 					}
-					send(text);
+
 					self.state.caps = None;
 					self.state.space = true;
 				}
 				EntryPart::SpecialPunct(punct) => {
-					send(punct.as_str().into());
+					buf += punct.as_str();
 					self.state.space = true;
 					self.state.caps = Some(punct.is_sentence_end());
 				}
@@ -131,11 +127,26 @@ impl App {
 				EntryPart::SetSpace(set) => {
 					self.state.space = *set;
 				}
-				EntryPart::Glue => todo!(),
+				EntryPart::Glue => {
+					if self.state.prev_was_glue {
+						self.state.space = false;
+						self.state.caps = Some(false);
+					}
+					self.state.prev_was_glue = true;
+				}
 				EntryPart::PloverCommand(command) => match *command {},
 			}
 		}
 
+		self
+			.backlog
+			.drain(..self.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
+		self.backlog.push_back(InputEvent {
+			strokes,
+			len: buf.len(),
+			state_before,
+		});
+		self.input.commit_string(buf);
 		self.input.commit(self.serial);
 	}
 
@@ -186,6 +197,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for App {
 		{
 			if key == ESCAPE_KEY {
 				state.should_exit = true;
+				return;
 			}
 
 			match key_state {
@@ -315,6 +327,7 @@ fn main() {
 		state: InputState {
 			caps: Some(true),
 			space: false,
+			prev_was_glue: false,
 		},
 		backlog: VecDeque::new(),
 	};
