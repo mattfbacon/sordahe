@@ -6,26 +6,26 @@ bitflags! {
 		const NUMBER_BAR = 1 << 0;
 		const S = 1 << 1;
 		const T = 1 << 2;
-		const P = 1 << 3;
-		const H = 1 << 4;
-		const STAR = 1 << 5;
-		const F = 1 << 6;
-		const P2 = 1 << 7;
-		const L = 1 << 8;
-		const T2 = 1 << 9;
-		const D = 1 << 10;
-		const K = 1 << 11;
-		const W = 1 << 12;
-		const R = 1 << 13;
+		const K = 1 << 3;
+		const P = 1 << 4;
+		const W = 1 << 5;
+		const H = 1 << 6;
+		const R = 1 << 7;
+		const A = 1 << 8;
+		const O = 1 << 9;
+		const STAR = 1 << 10;
+		const E = 1 << 11;
+		const U = 1 << 12;
+		const F = 1 << 13;
 		const R2 = 1 << 14;
-		const B = 1 << 15;
-		const G = 1 << 16;
-		const S2 = 1 << 17;
-		const Z = 1 << 18;
-		const A = 1 << 19;
-		const O = 1 << 20;
-		const E = 1 << 21;
-		const U = 1 << 22;
+		const P2 = 1 << 15;
+		const B = 1 << 16;
+		const L = 1 << 17;
+		const G = 1 << 18;
+		const T2 = 1 << 19;
+		const S2 = 1 << 20;
+		const D = 1 << 21;
+		const Z = 1 << 22;
 	}
 }
 

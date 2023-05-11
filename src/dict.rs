@@ -92,16 +92,11 @@ enum ParseError {
 fn parse_part(part: &str) -> Result<Keys, ParseError> {
 	let mut ret = Keys::empty();
 
-	let mut seen_s = false;
-	let mut seen_t = false;
-	let mut seen_p = false;
-	let mut seen_r = false;
-
 	let mut prev_dash = false;
 
 	macro_rules! do_double {
 		($seen:ident, $first:ident, $second:ident) => {
-			if $seen || prev_dash {
+			if prev_dash || ret.bits() >= Keys::$first.bits() {
 				Keys::$second
 			} else {
 				Keys::$first
@@ -147,19 +142,6 @@ fn parse_part(part: &str) -> Result<Keys, ParseError> {
 			other => return Err(ParseError::Unrecognized(other)),
 		};
 
-		macro_rules! set_seen {
-			($seen:ident, $first:ident, $second:ident) => {
-				if new.contains(Keys::$first) || new.contains(Keys::$second) {
-					$seen = true;
-				}
-			};
-		}
-
-		set_seen!(seen_s, S, S2);
-		set_seen!(seen_t, T, T2);
-		set_seen!(seen_p, P, P2);
-		set_seen!(seen_r, R, R2);
-
 		// Prevent duplicates, but ignore duplicates of the number bar.
 		let overlap = ret & new & !Keys::NUMBER_BAR;
 		if !overlap.is_empty() {
@@ -186,6 +168,8 @@ fn test_parse_part() {
 	assert_eq!(parse_part("-S").unwrap(), Keys::S2);
 	assert_eq!(parse_part("SS").unwrap(), Keys::S | Keys::S2);
 	assert_eq!(parse_part("S-S").unwrap(), Keys::S | Keys::S2);
+	// Respect steno order. This should not be `B | T`.
+	assert_eq!(parse_part("BT").unwrap(), Keys::B | Keys::T2);
 	assert_eq!(
 		parse_part("AOEU").unwrap(),
 		Keys::A | Keys::O | Keys::E | Keys::U
@@ -205,11 +189,11 @@ fn test_parse_part() {
 			| Keys::T
 			| Keys::P
 			| Keys::H
+			| Keys::E
+			| Keys::R2
 			| Keys::P2
 			| Keys::L
-			| Keys::R
 			| Keys::S2
-			| Keys::E
 	);
 	assert_eq!(
 		parse_part("1-RBGS").unwrap(),
@@ -217,7 +201,7 @@ fn test_parse_part() {
 	);
 	assert_eq!(
 		parse_part("KPA*BT").unwrap(),
-		Keys::K | Keys::P | Keys::A | Keys::STAR | Keys::B | Keys::T
+		Keys::K | Keys::P | Keys::A | Keys::STAR | Keys::B | Keys::T2
 	);
 }
 
