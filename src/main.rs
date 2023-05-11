@@ -12,13 +12,13 @@ use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::{
 	self, ZwpInputMethodV2,
 };
 
-use crate::dict::{Dict, Entry, EntryPart, Strokes};
+use crate::dict::{Dict, Entry, EntryPart, PloverCommand, Strokes};
 use crate::keys::Keys;
 
 mod dict;
 mod keys;
 
-const BACKLOG_DEPTH: usize = 16;
+const BACKLOG_DEPTH: usize = 1000;
 
 #[derive(Debug, Clone, Copy)]
 struct InputState {
@@ -138,7 +138,19 @@ impl App {
 					}
 					self.state.prev_was_glue = true;
 				}
-				EntryPart::PloverCommand(command) => match *command {},
+				EntryPart::PloverCommand(command) => match *command {
+					PloverCommand::Backspace => {
+						assert!(buf.is_empty(), "cannot mix backspace with text");
+						let prev = self.backlog.pop_back();
+						if let Some(prev) = &prev {
+							self.state = prev.state_before;
+						}
+						let to_delete = prev.map_or(1, |prev| prev.len).try_into().unwrap();
+						self.input.delete_surrounding_text(to_delete, 0);
+						self.input.commit(self.serial);
+						return;
+					}
+				},
 			}
 		}
 
@@ -155,7 +167,8 @@ impl App {
 	}
 
 	fn find_action(&self, this_keys: Keys) -> Option<Action> {
-		(0..=self.backlog.len()).find_map(|skip| {
+		let max_strokes = self.dict.max_strokes();
+		(self.backlog.len().saturating_sub(max_strokes)..=self.backlog.len()).find_map(|skip| {
 			let events = self.backlog.range(skip..);
 			let strokes = events
 				.clone()

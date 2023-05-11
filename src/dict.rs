@@ -12,15 +12,18 @@ use thiserror::Error;
 use crate::keys::Keys;
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum PloverCommand {}
+pub enum PloverCommand {
+	Backspace,
+}
 
 impl std::str::FromStr for PloverCommand {
 	type Err = ();
 
 	fn from_str(s: &str) -> Result<Self, ()> {
-		match s {
-			_ => Err(()),
-		}
+		Ok(match s {
+			"backspace" => Self::Backspace,
+			_ => return Err(()),
+		})
 	}
 }
 
@@ -336,6 +339,12 @@ pub struct Entry(pub Rc<[EntryPart]>);
 #[derive(Debug, PartialEq, Eq, Hash, DeserializeFromStr)]
 pub struct Strokes(pub Vec<Keys>);
 
+impl Strokes {
+	pub fn num_strokes(&self) -> usize {
+		self.0.len()
+	}
+}
+
 impl Borrow<[Keys]> for Strokes {
 	fn borrow(&self) -> &[Keys] {
 		&self.0
@@ -343,7 +352,10 @@ impl Borrow<[Keys]> for Strokes {
 }
 
 #[derive(Debug)]
-pub struct Dict(HashMap<Strokes, Entry>);
+pub struct Dict {
+	map: HashMap<Strokes, Entry>,
+	max_strokes: usize,
+}
 
 impl<'de> Deserialize<'de> for Dict {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -360,16 +372,19 @@ impl<'de> Deserialize<'de> for Dict {
 			}
 
 			fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-				let mut values = HashMap::with_capacity(access.size_hint().unwrap_or(0));
+				let mut map = HashMap::with_capacity(access.size_hint().unwrap_or(0));
 
-				while let Some((key, value)) = access.next_entry()? {
-					if let Some(old) = values.get(&key) {
-						eprintln!("warn: overlap on {key:?}; prev was {old:?}, current is {value:?}");
+				let mut max_strokes = 1;
+
+				while let Some((key, value)) = access.next_entry::<Strokes, Entry>()? {
+					if let Some(old) = map.get(&key) {
+						panic!("overlap on {key:?}; prev was {old:?}, current is {value:?}");
 					}
-					values.insert(key, value);
+					max_strokes = max_strokes.max(key.num_strokes());
+					map.insert(key, value);
 				}
 
-				Ok(Dict(values))
+				Ok(Dict { map, max_strokes })
 			}
 		}
 
@@ -384,6 +399,10 @@ impl Dict {
 	}
 
 	pub fn get(&self, keys: &[Keys]) -> Option<&Entry> {
-		self.0.get(keys)
+		self.map.get(keys)
+	}
+
+	pub fn max_strokes(&self) -> usize {
+		self.max_strokes
 	}
 }
