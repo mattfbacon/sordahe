@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use wayland_client::protocol::wl_keyboard::KeyState;
 use wayland_client::protocol::wl_registry;
 use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::{delegate_noop, Connection, Dispatch, Proxy, QueueHandle, WEnum};
+use wayland_client::{delegate_noop, Connection, Dispatch, QueueHandle, WEnum};
 use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_keyboard_grab_v2::{
 	self, ZwpInputMethodKeyboardGrabV2,
 };
@@ -206,12 +206,8 @@ impl Dispatch<ZwpInputMethodV2, ()> for App {
 		_conn: &Connection,
 		_qhandle: &QueueHandle<Self>,
 	) {
-		match event {
-			zwp_input_method_v2::Event::Unavailable => panic!("an IME is already registered"),
-			zwp_input_method_v2::Event::Done => {
-				state.serial += 1;
-			}
-			_ => {}
+		if let zwp_input_method_v2::Event::Done = event {
+			state.serial += 1;
 		}
 	}
 }
@@ -255,17 +251,20 @@ impl Dispatch<wl_registry::WlRegistry, ()> for NeededProxies {
 delegate_noop!(NeededProxies: ignore WlSeat);
 delegate_noop!(NeededProxies: ignore ZwpInputMethodManagerV2);
 
-struct Ignored;
+struct PanicIfImeUnavailable;
 
-impl<T: Proxy, U> Dispatch<T, U> for Ignored {
+impl Dispatch<ZwpInputMethodV2, ()> for PanicIfImeUnavailable {
 	fn event(
 		_state: &mut Self,
-		_proxy: &T,
-		_event: <T as Proxy>::Event,
-		_data: &U,
+		_proxy: &ZwpInputMethodV2,
+		event: <ZwpInputMethodV2 as wayland_client::Proxy>::Event,
+		_data: &(),
 		_conn: &Connection,
 		_qhandle: &QueueHandle<Self>,
 	) {
+		if let zwp_input_method_v2::Event::Unavailable = event {
+			panic!("an IME is already registered")
+		}
 	}
 }
 
@@ -291,7 +290,16 @@ fn main() {
 		(needed.manager.unwrap(), needed.seat.unwrap())
 	};
 
-	let input = manager.get_input_method(&seat, &conn.new_event_queue::<Ignored>().handle(), ());
+	let input = {
+		let mut queue = conn.new_event_queue::<PanicIfImeUnavailable>();
+		let handle = queue.handle();
+
+		let input = manager.get_input_method(&seat, &handle, ());
+
+		queue.roundtrip(&mut PanicIfImeUnavailable).unwrap();
+
+		input
+	};
 
 	let mut queue = conn.new_event_queue::<App>();
 	let handle = queue.handle();
