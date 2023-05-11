@@ -20,6 +20,19 @@ mod keys;
 
 const BACKLOG_DEPTH: usize = 16;
 
+#[derive(Debug, Clone, Copy)]
+struct InputState {
+	caps: Option<bool>,
+	space: bool,
+}
+
+#[derive(Debug)]
+struct InputEvent {
+	strokes: Vec<Keys>,
+	len: usize,
+	state_before: InputState,
+}
+
 #[derive(Debug)]
 struct App {
 	manager: Option<ZwpInputMethodManagerV2>,
@@ -29,9 +42,8 @@ struct App {
 	keys: Keys,
 	should_exit: bool,
 	dict: Dict,
-	caps: Option<bool>,
-	space: bool,
-	backlog: VecDeque<Keys>,
+	state: InputState,
+	backlog: VecDeque<InputEvent>,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for App {
@@ -121,68 +133,101 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for App {
 				}
 				KeyState::Released => {
 					if !state.keys.is_empty() {
-						/*
-						state
-							.input
-							.as_ref()
-							.unwrap()
-							.commit_string(format!("{:?}\n", state.keys));
-						state.input.as_ref().unwrap().commit(state.serial);
-						*/
-						/*
-						state
-							.input
-							.as_ref()
-							.unwrap()
-							.set_preedit_string("hello".into(), -1, -1);
-						state.input.as_ref().unwrap().commit(state.serial);
-						*/
 						let input = state.input.as_ref().unwrap();
 
-						eprintln!("{:?} {:?}", state.keys, state.dict.get(&[state.keys]));
-						for part in state.dict.get(&[state.keys]).into_iter().flatten() {
-							match part {
-								EntryPart::Verbatim(text) => {
-									let mut text = if state.space {
-										[" ", text].concat()
-									} else {
-										text.clone().into()
-									};
-									if let Some(caps) = state.caps {
-										if let Some((first_pos, first)) = text.char_indices().find(|(_, ch)| *ch != ' ')
-										{
-											let first = &mut text[first_pos..][..first.len_utf8()];
-											if caps {
-												first.make_ascii_uppercase();
-											} else {
-												first.make_ascii_lowercase();
+						let action = (0..state.backlog.len())
+							.find_map(|skip| {
+								let events = state.backlog.range(skip..);
+								let strokes = events
+									.clone()
+									.flat_map(|event| &event.strokes)
+									.copied()
+									.chain(std::iter::once(state.keys))
+									.collect::<Vec<_>>();
+								eprintln!("trying {strokes:?}");
+								state.dict.get(&strokes).map(|entry| {
+									(
+										entry,
+										strokes,
+										events.len(),
+										events.map(|event| event.len).sum(),
+										Some(state.backlog[skip].state_before),
+									)
+								})
+							})
+							.or_else(|| {
+								state
+									.dict
+									.get(&[state.keys])
+									.map(|entry| (entry, vec![state.keys], 0, 0, None))
+							});
+						eprintln!("{:?} {action:?}", state.keys);
+						if let Some((entry, strokes, pop_backlog, to_delete, restore_state)) = action {
+							state.backlog.truncate(state.backlog.len() - pop_backlog);
+
+							if let Some(restore_state) = restore_state {
+								state.state = restore_state;
+							}
+
+							if to_delete > 0 {
+								input.delete_surrounding_text(to_delete.try_into().unwrap(), 0);
+							}
+
+							let state_before = state.state;
+							let mut send = Some(|text: String| {
+								state
+									.backlog
+									.drain(..state.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
+								state.backlog.push_back(InputEvent {
+									strokes,
+									len: text.len(),
+									state_before,
+								});
+								input.commit_string(text);
+							});
+
+							for part in &entry.0 {
+								match part {
+									EntryPart::Verbatim(text) => {
+										let mut text = if state.state.space {
+											[" ", text].concat()
+										} else {
+											text.clone().into()
+										};
+										if let Some(caps) = state.state.caps {
+											if let Some((first_pos, first)) =
+												text.char_indices().find(|(_, ch)| *ch != ' ')
+											{
+												let first = &mut text[first_pos..][..first.len_utf8()];
+												if caps {
+													first.make_ascii_uppercase();
+												} else {
+													first.make_ascii_lowercase();
+												}
 											}
 										}
+										send.take().unwrap()(text);
+										state.state.caps = None;
+										state.state.space = true;
 									}
-									input.commit_string(text);
-									state.caps = None;
-									state.space = true;
-								}
-								EntryPart::SpecialPunct(punct) => {
-									if punct.is_sentence_end() {
-										input.commit_string(punct.as_str().into());
-										state.caps = Some(true);
-										state.space = true;
-									} else {
+									EntryPart::SpecialPunct(punct) => {
+										send.take().unwrap()(punct.as_str().into());
+										state.state.space = true;
+										state.state.caps = Some(punct.is_sentence_end());
 									}
+									EntryPart::SetCaps(set) => {
+										state.state.caps = Some(*set);
+									}
+									EntryPart::SetSpace(set) => {
+										state.state.space = *set;
+									}
+									EntryPart::Glue => todo!(),
+									EntryPart::PloverCommand(command) => match *command {},
 								}
-								EntryPart::SetCaps(set) => {
-									state.caps = Some(*set);
-								}
-								EntryPart::SetSpace(set) => {
-									state.space = *set;
-								}
-								EntryPart::Glue => todo!(),
-								EntryPart::PloverCommand(command) => match *command {},
 							}
-						}
 
-						state.input.as_ref().unwrap().commit(state.serial);
+							input.commit(state.serial);
+						}
 
 						state.keys = Keys::empty();
 					}
@@ -223,8 +268,10 @@ fn main() {
 		keys: Keys::empty(),
 		should_exit: false,
 		dict,
-		caps: Some(true),
-		space: false,
+		state: InputState {
+			caps: Some(true),
+			space: false,
+		},
 		backlog: VecDeque::new(),
 	};
 
