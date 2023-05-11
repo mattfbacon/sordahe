@@ -169,9 +169,9 @@
      borderopacity="1.0"
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
-     inkscape:zoom="0.57951933"
-     inkscape:cx="358.91814"
-     inkscape:cy="87.141183"
+     inkscape:zoom="0.8195641"
+     inkscape:cx="367.87849"
+     inkscape:cy="181.19388"
      inkscape:document-units="px"
      inkscape:current-layer="layer1"
      inkscape:grid-points="true"
@@ -871,5 +871,17 @@
          id="tspan1008"
          x="78.836891"
          y="36.135818">---------NUMBER BAR-----------------------</tspan></text>
+    <circle
+       style="fill:none;stroke:#f4dd8a;stroke-width:3.26929;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers;stop-color:#000000;stroke-opacity:1"
+       id="path610"
+       cx="315.02072"
+       cy="148.80719"
+       r="25.604313" />
+    <circle
+       style="fill:none;stroke:#f4dd8a;stroke-width:3.26929;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers;stop-color:#000000;stroke-opacity:1"
+       id="path612"
+       cx="492.89255"
+       cy="150.73752"
+       r="23.950422" />
   </g>
 </svg>
