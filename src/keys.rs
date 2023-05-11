@@ -1,7 +1,7 @@
 use bitflags::bitflags;
 
 bitflags! {
-	#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+	#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 	pub struct Keys: u32 {
 		const NUMBER_BAR = 1 << 0;
 		const S = 1 << 1;

@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::str::FromStr;
 
 use logos::Logos as _;
@@ -313,24 +314,24 @@ impl FromStr for Entry {
 			}
 		}
 
-		Ok(Self(ret))
+		Ok(Self(ret.into()))
 	}
 }
 
 #[test]
 fn test_parse_entry() {
 	assert_eq!(
-		r"{>} {&p\^}".parse::<Entry>().unwrap().0,
-		vec![
+		&r"{>} {&p\^}".parse::<Entry>().unwrap().0 as &[_],
+		&[
 			EntryPart::SetCaps(false),
 			EntryPart::Glue,
 			EntryPart::Verbatim("p^".into()),
-		]
+		],
 	);
 }
 
-#[derive(Debug, PartialEq, Eq, DeserializeFromStr)]
-pub struct Entry(pub Vec<EntryPart>);
+#[derive(Clone, Debug, PartialEq, Eq, DeserializeFromStr)]
+pub struct Entry(pub Rc<[EntryPart]>);
 
 #[derive(Debug, PartialEq, Eq, Hash, DeserializeFromStr)]
 pub struct Strokes(pub Vec<Keys>);
@@ -358,11 +359,7 @@ impl<'de> Deserialize<'de> for Dict {
 				formatter.write_str("a string-to-string map")
 			}
 
-			#[inline]
-			fn visit_map<A>(self, mut access: A) -> Result<Self::Value, A::Error>
-			where
-				A: MapAccess<'de>,
-			{
+			fn visit_map<A: MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
 				let mut values = HashMap::with_capacity(access.size_hint().unwrap_or(0));
 
 				while let Some((key, value)) = access.next_entry()? {
