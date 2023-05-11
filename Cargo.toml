@@ -9,5 +9,7 @@ bitflags = "2"
 logos = "0.13"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_with = "3"
+thiserror = "1"
 wayland-client = "0.30"
 wayland-protocols-misc = { version = "0.1", features = ["client"] }
