@@ -1,0 +1,13 @@
+[package]
+name = "tt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+arrayvec = "0.7"
+bitflags = "2"
+logos = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wayland-client = "0.30"
+wayland-protocols-misc = { version = "0.1", features = ["client"] }
