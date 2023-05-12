@@ -344,12 +344,24 @@ fn test_parse_entry() {
 #[derive(Clone, Debug, PartialEq, Eq, DeserializeFromStr)]
 pub struct Entry(pub Rc<[EntryPart]>);
 
+impl From<Vec<EntryPart>> for Entry {
+	fn from(parts: Vec<EntryPart>) -> Self {
+		Self(parts.into())
+	}
+}
+
 #[derive(Debug, PartialEq, Eq, Hash, DeserializeFromStr)]
 pub struct Strokes(pub Vec<Keys>);
 
 impl Strokes {
 	pub fn num_strokes(&self) -> usize {
 		self.0.len()
+	}
+}
+
+impl From<Vec<Keys>> for Strokes {
+	fn from(keys: Vec<Keys>) -> Self {
+		Self(keys)
 	}
 }
 

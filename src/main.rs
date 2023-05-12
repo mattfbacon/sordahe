@@ -70,27 +70,22 @@ impl App {
 		}
 
 		let action = self.find_action(keys);
-		let Some(Action {
-			entry,
-			strokes,
-			pop_backlog,
-			to_delete,
-			restore_state,
-		}) = action else { return; };
 
-		self.backlog.truncate(self.backlog.len() - pop_backlog);
+		self
+			.backlog
+			.truncate(self.backlog.len() - action.pop_backlog);
 
-		if let Some(restore_state) = restore_state {
+		if let Some(restore_state) = action.restore_state {
 			self.state = restore_state;
 		}
 
-		self.delete(to_delete);
+		self.delete(action.to_delete);
 
 		let state_before = self.state;
 
 		let mut buf = String::new();
 
-		for part in &*entry.0 {
+		for part in &*action.entry.0 {
 			match part {
 				EntryPart::Verbatim(text) => {
 					if self.state.space {
@@ -164,7 +159,7 @@ impl App {
 			.backlog
 			.drain(..self.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
 		self.backlog.push_back(InputEvent {
-			strokes,
+			strokes: action.strokes,
 			len: buf.len(),
 			state_before,
 		});
@@ -172,24 +167,32 @@ impl App {
 		self.input.commit(self.serial);
 	}
 
-	fn find_action(&self, this_keys: Keys) -> Option<Action> {
+	fn find_action(&self, this_keys: Keys) -> Action {
 		let max_strokes = self.dict.max_strokes();
-		(self.backlog.len().saturating_sub(max_strokes)..=self.backlog.len()).find_map(|skip| {
-			let events = self.backlog.range(skip..);
-			let strokes = events
-				.clone()
-				.flat_map(|event| &event.strokes.0)
-				.copied()
-				.chain(std::iter::once(this_keys))
-				.collect::<Vec<_>>();
-			self.dict.get(&strokes).map(|entry| Action {
-				entry: entry.clone(),
-				strokes: Strokes(strokes),
-				pop_backlog: events.len(),
-				to_delete: events.map(|event| event.len).sum::<usize>(),
-				restore_state: self.backlog.get(skip).map(|event| event.state_before),
+		(self.backlog.len().saturating_sub(max_strokes)..=self.backlog.len())
+			.find_map(|skip| {
+				let events = self.backlog.range(skip..);
+				let strokes = events
+					.clone()
+					.flat_map(|event| &event.strokes.0)
+					.copied()
+					.chain(std::iter::once(this_keys))
+					.collect::<Vec<_>>();
+				self.dict.get(&strokes).map(|entry| Action {
+					entry: entry.clone(),
+					strokes: Strokes(strokes),
+					pop_backlog: events.len(),
+					to_delete: events.map(|event| event.len).sum::<usize>(),
+					restore_state: self.backlog.get(skip).map(|event| event.state_before),
+				})
 			})
-		})
+			.unwrap_or_else(|| Action {
+				entry: vec![EntryPart::Verbatim(this_keys.to_string().into())].into(),
+				strokes: vec![this_keys].into(),
+				pop_backlog: 0,
+				to_delete: 0,
+				restore_state: None,
+			})
 	}
 
 	fn delete(&self, amount: usize) {
