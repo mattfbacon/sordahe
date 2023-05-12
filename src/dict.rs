@@ -16,7 +16,7 @@ pub enum PloverCommand {
 	Backspace,
 }
 
-impl std::str::FromStr for PloverCommand {
+impl FromStr for PloverCommand {
 	type Err = ();
 
 	fn from_str(s: &str) -> Result<Self, ()> {
@@ -33,7 +33,7 @@ macro_rules! str_enum {
 			$($variant,)*
 		}
 
-		impl std::str::FromStr for $name {
+		impl FromStr for $name {
 			type Err = ();
 
 			fn from_str(s: &str) -> Result<Self, ()> {
@@ -387,7 +387,7 @@ impl<'de> Deserialize<'de> for Dict {
 		impl<'de> Visitor<'de> for MapVisitor {
 			type Value = Dict;
 
-			fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+			fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 				formatter.write_str("a string-to-string map")
 			}
 

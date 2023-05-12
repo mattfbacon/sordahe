@@ -1,3 +1,21 @@
+#![deny(
+	absolute_paths_not_starting_with_crate,
+	keyword_idents,
+	macro_use_extern_crate,
+	meta_variable_misuse,
+	missing_abi,
+	missing_copy_implementations,
+	non_ascii_idents,
+	nonstandard_style,
+	noop_method_call,
+	pointer_structural_match,
+	private_in_public,
+	rust_2018_idioms,
+	unused_qualifications
+)]
+#![warn(clippy::pedantic)]
+#![forbid(unsafe_code)]
+
 use std::collections::VecDeque;
 
 use wayland_client::protocol::wl_keyboard::KeyState;
@@ -96,10 +114,7 @@ impl App {
 					buf += text;
 
 					if let Some(caps) = self.state.caps {
-						let first_len = buf[first_pos..]
-							.chars()
-							.next()
-							.map_or(0, |ch| ch.len_utf8());
+						let first_len = buf[first_pos..].chars().next().map_or(0, char::len_utf8);
 						let first = &mut buf[first_pos..][..first_len];
 
 						if caps {
