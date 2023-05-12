@@ -16,8 +16,6 @@
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
-use std::collections::VecDeque;
-
 use wayland_client::protocol::wl_keyboard::KeyState;
 use wayland_client::protocol::wl_registry;
 use wayland_client::protocol::wl_seat::WlSeat;
@@ -30,192 +28,27 @@ use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::{
 	self, ZwpInputMethodV2,
 };
 
-use crate::dict::{Dict, Entry, EntryPart, PloverCommand, Strokes};
-use crate::keys::{Key, Keys};
+use crate::dict::Dict;
+use crate::steno::{Output as StenoOutput, Steno};
 
 mod dict;
 mod keys;
-
-const BACKLOG_DEPTH: usize = 1000;
-
-#[derive(Debug, Clone, Copy)]
-struct InputState {
-	caps: Option<bool>,
-	space: bool,
-	carry_to_next: bool,
-	prev_was_glue: bool,
-}
-
-#[derive(Debug)]
-struct InputEvent {
-	strokes: Strokes,
-	len: usize,
-	state_before: InputState,
-}
+mod steno;
 
 #[derive(Debug)]
 struct App {
-	dict: Dict,
 	input: ZwpInputMethodV2,
 	serial: u32,
-	keys: Keys,
 	should_exit: bool,
-	state: InputState,
-	backlog: VecDeque<InputEvent>,
-}
 
-#[derive(Debug)]
-struct Action {
-	entry: Entry,
-	strokes: Strokes,
-	pop_backlog: usize,
-	to_delete: usize,
-	restore_state: Option<InputState>,
+	steno: Steno,
 }
 
 impl App {
-	fn key_pressed(&mut self, code: u32) {
-		if let Some(bit) = Key::from_code(code) {
-			self.keys |= bit;
-		}
-	}
-
-	fn key_released(&mut self, _code: u32) {
-		let keys = std::mem::take(&mut self.keys);
-
-		if keys.is_empty() {
-			return;
-		}
-
-		let action = self.find_action(keys);
-
-		self
-			.backlog
-			.truncate(self.backlog.len() - action.pop_backlog);
-
-		if let Some(restore_state) = action.restore_state {
-			self.state = restore_state;
-		}
-
-		self.delete(action.to_delete);
-
-		let state_before = self.state;
-
-		let mut buf = String::new();
-
-		for part in &*action.entry.0 {
-			match part {
-				EntryPart::Verbatim(text) => {
-					if self.state.space {
-						buf += " ";
-					}
-
-					let first_pos = buf.len();
-					buf += text;
-
-					if let Some(caps) = self.state.caps {
-						let first_len = buf[first_pos..].chars().next().map_or(0, char::len_utf8);
-						let first = &mut buf[first_pos..][..first_len];
-
-						if caps {
-							first.make_ascii_uppercase();
-						} else {
-							first.make_ascii_lowercase();
-						}
-					}
-
-					if !std::mem::replace(&mut self.state.carry_to_next, false) {
-						self.state.caps = None;
-						self.state.space = true;
-					}
-				}
-				EntryPart::SpecialPunct(punct) => {
-					buf += punct.as_str();
-					self.state.space = true;
-					self.state.caps = if punct.is_sentence_end() {
-						Some(true)
-					} else {
-						None
-					};
-				}
-				EntryPart::SetCaps(set) => {
-					self.state.caps = Some(*set);
-				}
-				EntryPart::SetSpace(set) => {
-					self.state.space = *set;
-				}
-				EntryPart::CarryToNext => {
-					self.state.carry_to_next = true;
-				}
-				EntryPart::Glue => {
-					if self.state.prev_was_glue {
-						self.state.space = false;
-						self.state.caps = Some(false);
-					}
-					self.state.prev_was_glue = true;
-				}
-				EntryPart::PloverCommand(command) => match *command {
-					PloverCommand::Backspace => {
-						assert!(buf.is_empty(), "cannot mix backspace with text");
-						let prev = self.backlog.pop_back();
-						if let Some(prev) = &prev {
-							self.state = prev.state_before;
-						}
-						let to_delete = prev.map_or(1, |prev| prev.len).try_into().unwrap();
-						self.input.delete_surrounding_text(to_delete, 0);
-						self.input.commit(self.serial);
-						return;
-					}
-				},
-			}
-		}
-
-		self
-			.backlog
-			.drain(..self.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
-		self.backlog.push_back(InputEvent {
-			strokes: action.strokes,
-			len: buf.len(),
-			state_before,
-		});
-		self.input.commit_string(buf);
+	fn run_output(&mut self, output: StenoOutput) {
+		self.input.delete_surrounding_text(output.delete, 0);
+		self.input.commit_string(output.append);
 		self.input.commit(self.serial);
-	}
-
-	fn find_action(&self, this_keys: Keys) -> Action {
-		let max_strokes = self.dict.max_strokes();
-		(self.backlog.len().saturating_sub(max_strokes)..=self.backlog.len())
-			.find_map(|skip| {
-				let events = self.backlog.range(skip..);
-				let strokes = events
-					.clone()
-					.flat_map(|event| &event.strokes.0)
-					.copied()
-					.chain(std::iter::once(this_keys))
-					.collect::<Vec<_>>();
-				self.dict.get(&strokes).map(|entry| Action {
-					entry: entry.clone(),
-					strokes: Strokes(strokes),
-					pop_backlog: events.len(),
-					to_delete: events.map(|event| event.len).sum::<usize>(),
-					restore_state: self.backlog.get(skip).map(|event| event.state_before),
-				})
-			})
-			.unwrap_or_else(|| Action {
-				entry: vec![EntryPart::Verbatim(this_keys.to_string().into())].into(),
-				strokes: vec![this_keys].into(),
-				pop_backlog: 0,
-				to_delete: 0,
-				restore_state: None,
-			})
-	}
-
-	fn delete(&self, amount: usize) {
-		if amount > 0 {
-			self
-				.input
-				.delete_surrounding_text(amount.try_into().unwrap(), 0);
-		}
 	}
 }
 
@@ -242,8 +75,12 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for App {
 			}
 
 			match key_state {
-				KeyState::Pressed => state.key_pressed(key),
-				KeyState::Released => state.key_released(key),
+				KeyState::Pressed => state.steno.key_pressed(key),
+				KeyState::Released => {
+					if let Some(output) = state.steno.key_released(key) {
+						state.run_output(output);
+					}
+				}
 				_ => {}
 			}
 		}
@@ -360,18 +197,10 @@ fn main() {
 	let grab = input.grab_keyboard(&handle, ());
 
 	let mut app = App {
-		dict,
 		input,
 		serial: 0,
-		keys: Keys::empty(),
 		should_exit: false,
-		state: InputState {
-			caps: Some(true),
-			space: false,
-			carry_to_next: false,
-			prev_was_glue: false,
-		},
-		backlog: VecDeque::new(),
+		steno: Steno::new(dict),
 	};
 
 	queue.roundtrip(&mut app).unwrap();
