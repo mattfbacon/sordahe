@@ -81,6 +81,7 @@ pub enum EntryPart {
 	SpecialPunct(SpecialPunct),
 	SetCaps(bool),
 	SetSpace(bool),
+	CarryToNext,
 	Glue,
 	PloverCommand(PloverCommand),
 }
@@ -283,20 +284,27 @@ impl FromStr for Entry {
 								let (strip_before, inner) = inner
 									.strip_prefix('^')
 									.map_or((false, inner), |inner| (true, inner));
+								let (carry_to_next, inner) = inner
+									.strip_prefix("~|")
+									.map_or((false, inner), |inner| (true, inner));
 								let (glue, inner) = inner
 									.strip_prefix('&')
 									.map_or((false, inner), |inner| (true, inner));
+
 								let (strip_after, inner) = inner
 									.strip_suffix('^')
 									.filter(|inner| !inner.ends_with('\\'))
 									.map_or((false, inner), |inner| (true, inner));
 
-								if !(strip_before || strip_after || glue) {
+								if !(strip_before || carry_to_next || glue || strip_after) {
 									eprintln!("warn: pointless curlies around {inner:?}; treating as verbatim");
 								}
 
 								if strip_before {
 									ret.push(EntryPart::SetSpace(false));
+								}
+								if carry_to_next {
+									ret.push(EntryPart::CarryToNext);
 								}
 								if glue {
 									ret.push(EntryPart::Glue);

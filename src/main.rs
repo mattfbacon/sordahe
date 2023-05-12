@@ -24,6 +24,7 @@ const BACKLOG_DEPTH: usize = 1000;
 struct InputState {
 	caps: Option<bool>,
 	space: bool,
+	carry_to_next: bool,
 	prev_was_glue: bool,
 }
 
@@ -113,8 +114,10 @@ impl App {
 						}
 					}
 
-					self.state.caps = None;
-					self.state.space = true;
+					if !std::mem::replace(&mut self.state.carry_to_next, false) {
+						self.state.caps = None;
+						self.state.space = true;
+					}
 				}
 				EntryPart::SpecialPunct(punct) => {
 					buf += punct.as_str();
@@ -130,6 +133,9 @@ impl App {
 				}
 				EntryPart::SetSpace(set) => {
 					self.state.space = *set;
+				}
+				EntryPart::CarryToNext => {
+					self.state.carry_to_next = true;
 				}
 				EntryPart::Glue => {
 					if self.state.prev_was_glue {
@@ -344,6 +350,7 @@ fn main() {
 		state: InputState {
 			caps: Some(true),
 			space: false,
+			carry_to_next: false,
 			prev_was_glue: false,
 		},
 		backlog: VecDeque::new(),
