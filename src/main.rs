@@ -13,7 +13,7 @@ use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::{
 };
 
 use crate::dict::{Dict, Entry, EntryPart, PloverCommand, Strokes};
-use crate::keys::Keys;
+use crate::keys::{Key, Keys};
 
 mod dict;
 mod keys;
@@ -56,7 +56,7 @@ struct Action {
 
 impl App {
 	fn key_pressed(&mut self, code: u32) {
-		if let Some(bit) = Keys::from_code(code) {
+		if let Some(bit) = Key::from_code(code) {
 			self.keys |= bit;
 		}
 	}
