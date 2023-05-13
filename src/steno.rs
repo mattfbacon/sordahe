@@ -71,6 +71,8 @@ impl Steno {
 			return None;
 		}
 
+		eprintln!("{keys:#}");
+
 		let action = self.find_action(keys);
 
 		Some(self.run_action(action))

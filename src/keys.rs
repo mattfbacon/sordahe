@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
 macro_rules! key_enum {
@@ -168,8 +168,12 @@ impl Keys {
 		self.0 == 0
 	}
 
-	pub fn bits(self) -> u32 {
+	pub const fn bits(self) -> u32 {
 		self.0
+	}
+
+	pub const fn contains(self, key: Key) -> bool {
+		self.0 & Keys::single(key).0 > 0
 	}
 }
 
@@ -258,17 +262,29 @@ impl Not for Keys {
 
 impl Display for Keys {
 	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-		for key in self {
-			let needs_dash = {
-				let second = key;
-				key.other_before().map_or(false, |first| {
-					!self.into_iter().any(|key| key >= first && key < second)
-				})
-			};
-			if needs_dash {
-				formatter.write_str("-")?;
+		if formatter.alternate() {
+			for possible in Self::all() {
+				let ch = if self.contains(possible) {
+					possible.to_char()
+				} else {
+					' '
+				};
+				formatter.write_char(ch)?;
+				formatter.write_char(' ')?;
 			}
-			key.to_char().fmt(formatter)?;
+		} else {
+			for key in self {
+				let needs_dash = {
+					let second = key;
+					key.other_before().map_or(false, |first| {
+						!self.into_iter().any(|key| key >= first && key < second)
+					})
+				};
+				if needs_dash {
+					formatter.write_str("-")?;
+				}
+				key.to_char().fmt(formatter)?;
+			}
 		}
 		Ok(())
 	}
