@@ -157,7 +157,7 @@ impl Steno {
 			EntryPart::Glue => {
 				if self.state.prev_was_glue {
 					self.state.space = false;
-					self.state.caps = Some(false);
+					self.state.caps = None;
 				}
 				seen_glue = true;
 			}
