@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 
 use serde_with::DeserializeFromStr;
@@ -162,5 +163,17 @@ impl FromStr for Strokes {
 			.map(parse_part)
 			.collect::<Result<Vec<_>, _>>()
 			.map(Self)
+	}
+}
+
+impl Display for Strokes {
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+		let [first, rest @ ..] = self.0.as_slice() else { return Ok(()); };
+		first.fmt(formatter)?;
+		for keys in rest {
+			formatter.write_str("/")?;
+			keys.fmt(formatter)?;
+		}
+		Ok(())
 	}
 }
