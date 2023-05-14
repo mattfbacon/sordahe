@@ -47,6 +47,7 @@ str_enum! {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PloverCommand {
 	Backspace = "backspace",
+	Quit = "quit",
 }
 }
 

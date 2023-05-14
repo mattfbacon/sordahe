@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -53,8 +54,8 @@ impl<'de> Deserialize<'de> for Dict {
 }
 
 impl Dict {
-	pub fn load() -> Self {
-		serde_json::from_str(&std::fs::read_to_string("dict.json").unwrap()).unwrap()
+	pub fn load(path: &Path) -> Self {
+		serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 	}
 
 	pub fn get(&self, keys: &[Keys]) -> Option<&Entry> {

@@ -37,9 +37,15 @@ struct Action {
 }
 
 #[derive(Debug)]
-pub struct Output {
-	pub delete: u32,
-	pub append: String,
+pub enum Deletion {
+	Word,
+	Exact(u32),
+}
+
+#[derive(Debug)]
+pub enum Output {
+	Normal { delete: Deletion, append: String },
+	Quit,
 }
 
 impl Steno {
@@ -178,11 +184,16 @@ impl Steno {
 					if let Some(prev) = &prev {
 						self.state = prev.state_before;
 					}
-					let to_delete = prev.map_or(1, |prev| prev.len).try_into().unwrap();
-					return Output {
-						delete: to_delete,
+					let delete = prev.map_or(Deletion::Word, |prev| {
+						Deletion::Exact(prev.len.try_into().unwrap())
+					});
+					return Output::Normal {
+						delete,
 						append: String::new(),
 					};
+				}
+				Err(PloverCommand::Quit) => {
+					return Output::Quit;
 				}
 			}
 		}
@@ -197,8 +208,8 @@ impl Steno {
 			state_before,
 		});
 
-		Output {
-			delete: action.to_delete,
+		Output::Normal {
+			delete: Deletion::Exact(action.to_delete),
 			append: buf,
 		}
 	}
