@@ -29,6 +29,7 @@ use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::{
 };
 
 use crate::dict::Dict;
+use crate::keys::{Key, Keys};
 use crate::steno::{Output as StenoOutput, Steno};
 
 mod dict;
@@ -40,11 +41,26 @@ struct App {
 	input: ZwpInputMethodV2,
 	serial: u32,
 	should_exit: bool,
+	keys_seen: Keys,
+	keys_current: Keys,
 
 	steno: Steno,
 }
 
 impl App {
+	fn key_pressed(&mut self, key: Key) {
+		self.keys_seen |= key;
+		self.keys_current |= key;
+	}
+
+	fn key_released(&mut self, key: Key) {
+		self.keys_current &= !key;
+		if self.keys_current.is_empty() && !self.keys_seen.is_empty() {
+			let output = self.steno.handle_keys(std::mem::take(&mut self.keys_seen));
+			self.run_output(output);
+		}
+	}
+
 	fn run_output(&mut self, output: StenoOutput) {
 		self.input.delete_surrounding_text(output.delete, 0);
 		self.input.commit_string(output.append);
@@ -74,12 +90,14 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, ()> for App {
 				return;
 			}
 
+			let Some(key) = Key::from_code(key) else { return; };
+
 			match key_state {
-				KeyState::Pressed => state.steno.key_pressed(key),
+				KeyState::Pressed => {
+					state.key_pressed(key);
+				}
 				KeyState::Released => {
-					if let Some(output) = state.steno.key_released(key) {
-						state.run_output(output);
-					}
+					state.key_released(key);
 				}
 				_ => {}
 			}
@@ -200,6 +218,8 @@ fn main() {
 		input,
 		serial: 0,
 		should_exit: false,
+		keys_current: Keys::empty(),
+		keys_seen: Keys::empty(),
 		steno: Steno::new(dict),
 	};
 

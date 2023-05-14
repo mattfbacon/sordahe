@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use crate::dict::{Dict, Entry, EntryPart, PloverCommand, Strokes};
-use crate::keys::{Key, Keys};
+use crate::keys::Keys;
 
 const BACKLOG_DEPTH: usize = 1000;
 
@@ -23,7 +23,6 @@ struct InputEvent {
 #[derive(Debug)]
 pub struct Steno {
 	dict: Dict,
-	keys: Keys,
 	state: InputState,
 	backlog: VecDeque<InputEvent>,
 }
@@ -47,7 +46,6 @@ impl Steno {
 	pub fn new(dict: Dict) -> Self {
 		Self {
 			dict,
-			keys: Keys::empty(),
 			state: InputState {
 				caps: Some(true),
 				space: false,
@@ -58,24 +56,10 @@ impl Steno {
 		}
 	}
 
-	pub fn key_pressed(&mut self, code: u32) {
-		if let Some(bit) = Key::from_code(code) {
-			self.keys |= bit;
-		}
-	}
-
-	pub fn key_released(&mut self, _code: u32) -> Option<Output> {
-		let keys = std::mem::take(&mut self.keys);
-
-		if keys.is_empty() {
-			return None;
-		}
-
+	pub fn handle_keys(&mut self, keys: Keys) -> Output {
 		eprintln!("{keys:#}");
-
 		let action = self.find_action(keys);
-
-		Some(self.run_action(action))
+		self.run_action(action)
 	}
 
 	fn find_action(&self, this_keys: Keys) -> Action {

@@ -260,6 +260,14 @@ impl Not for Keys {
 	}
 }
 
+impl Not for Key {
+	type Output = Keys;
+
+	fn not(self) -> Keys {
+		!Keys::from(self)
+	}
+}
+
 impl Display for Keys {
 	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
 		if formatter.alternate() {
