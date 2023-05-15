@@ -58,7 +58,7 @@ impl Steno {
 				carry_to_next: false,
 				prev_was_glue: false,
 			},
-			backlog: VecDeque::new(),
+			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
 		}
 	}
 
@@ -70,34 +70,55 @@ impl Steno {
 
 	fn find_action(&self, this_keys: Keys) -> Action {
 		let max_strokes = self.dict.max_strokes();
-		(self.backlog.len().saturating_sub(max_strokes)..=self.backlog.len())
-			.find_map(|skip| {
-				let events = self.backlog.range(skip..);
-				let strokes = events
-					.clone()
-					.flat_map(|event| &event.strokes.0)
-					.copied()
-					.chain(std::iter::once(this_keys))
-					.collect::<Vec<_>>();
-				self.dict.get(&strokes).map(|entry| Action {
+
+		// As a by-reference iterator, this is cheaply cloneable, which we take advantage of.
+		let events = self
+			.backlog
+			.range(self.backlog.len().saturating_sub(max_strokes)..);
+
+		let mut all_strokes: Vec<Keys> = events
+			.clone()
+			.flat_map(|event| &event.strokes.0)
+			.copied()
+			.chain(std::iter::once(this_keys))
+			.collect();
+
+		let mut skip = 0;
+		for (i, event) in events
+			.clone()
+			.map(Some)
+			.chain(std::iter::once(None))
+			.enumerate()
+		{
+			let these_events = events.clone().skip(i);
+			let these_strokes = &all_strokes[skip..];
+			if let Some(entry) = self.dict.get(these_strokes) {
+				all_strokes.drain(..skip);
+				return Action {
 					entry: entry.clone(),
-					strokes: Strokes(strokes),
-					pop_backlog: events.len(),
-					to_delete: events
+					strokes: Strokes(all_strokes),
+					pop_backlog: these_events.len(),
+					to_delete: these_events
+						.clone()
 						.map(|event| event.len)
 						.sum::<usize>()
 						.try_into()
 						.unwrap(),
-					restore_state: self.backlog.get(skip).map(|event| event.state_before),
-				})
-			})
-			.unwrap_or_else(|| Action {
-				entry: vec![EntryPart::Verbatim(this_keys.to_string().into())].into(),
-				strokes: vec![this_keys].into(),
-				pop_backlog: 0,
-				to_delete: 0,
-				restore_state: None,
-			})
+					restore_state: event.map(|event| event.state_before),
+				};
+			}
+			if let Some(event) = event {
+				skip += event.strokes.num_strokes();
+			}
+		}
+
+		Action {
+			entry: vec![EntryPart::Verbatim(this_keys.to_string().into())].into(),
+			strokes: vec![this_keys].into(),
+			pop_backlog: 0,
+			to_delete: 0,
+			restore_state: None,
+		}
 	}
 
 	fn run_part(&mut self, part: &EntryPart, buf: &mut String) -> Result<bool, PloverCommand> {
