@@ -2,7 +2,8 @@
 xkb_keymap {
 	xkb_keycodes "wl-steno" {
 		minimum = 8;
-		maximum = 255;<8> = 8;
+		maximum = 255;
+<8> = 8;
 <9> = 9;
 <10> = 10;
 <32> = 32;
@@ -204,4 +205,3 @@ key <125> { [ braceright ] };
 key <126> { [ asciitilde ] };
 	};
 };
-	
