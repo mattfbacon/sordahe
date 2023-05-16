@@ -706,6 +706,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a507befe795404456341dfab10cef66ead4c041f62b8b11bbb92bffe5d0953e0"
 
 [[package]]
+name = "sordahe"
+version = "0.1.0"
+dependencies = [
+ "argh",
+ "logos",
+ "memfd",
+ "paste",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "serialport",
+ "thiserror",
+ "wayland-client",
+ "wayland-protocols-misc",
+]
+
+[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -793,23 +810,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "372950940a5f07bf38dbe211d7283c9e6d7327df53794992d293e534c733d09b"
 dependencies = [
  "time-core",
-]
-
-[[package]]
-name = "tt"
-version = "0.1.0"
-dependencies = [
- "argh",
- "logos",
- "memfd",
- "paste",
- "serde",
- "serde_json",
- "serde_with",
- "serialport",
- "thiserror",
- "wayland-client",
- "wayland-protocols-misc",
 ]
 
 [[package]]
