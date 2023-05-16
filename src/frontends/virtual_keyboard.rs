@@ -2,6 +2,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 
+use memfd::MemfdOptions;
 use serialport::{SerialPortType, TTYPort as TtyPort};
 use wayland_client::protocol::wl_keyboard::{KeyState, KeymapFormat};
 use wayland_client::protocol::wl_registry;
@@ -217,8 +218,12 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 
 	queue.roundtrip(&mut App).unwrap();
 
-	let mut keymap_file = tempfile::tempfile().unwrap();
-	keymap_file.write_all(KEYMAP.as_bytes()).unwrap();
+	let keymap_file = MemfdOptions::new()
+		.allow_sealing(true)
+		.close_on_exec(true)
+		.create("sordahe-keymap")
+		.unwrap();
+	keymap_file.as_file().write_all(KEYMAP.as_bytes()).unwrap();
 
 	keyboard.keymap(
 		KeymapFormat::XkbV1 as u32,
