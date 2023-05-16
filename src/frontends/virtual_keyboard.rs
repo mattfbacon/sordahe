@@ -181,11 +181,110 @@ impl<I: Read> Iterator for GeminiDevice<I> {
 const KEYMAP: &str = include_str!("../../keymap.xkb");
 
 const MOD_NONE: u32 = 0;
+const MOD_SHIFT: u32 = 1 << 0;
 const MOD_CONTROL: u32 = 1 << 2;
 const GROUP: u32 = 0;
 
 const KEYCODE_BASE: u32 = 8;
-const BACKSPACE: u32 = 0;
+const BACKSPACE: u8 = 8;
+
+struct Keyboard {
+	inner: ZwpVirtualKeyboardV1,
+	serial: u32,
+}
+
+impl Keyboard {
+	fn new(inner: ZwpVirtualKeyboardV1) -> Self {
+		let keymap_file = MemfdOptions::new()
+			.allow_sealing(true)
+			.close_on_exec(true)
+			.create("sordahe-keymap")
+			.unwrap();
+		keymap_file.as_file().write_all(KEYMAP.as_bytes()).unwrap();
+
+		inner.keymap(
+			KeymapFormat::XkbV1 as u32,
+			keymap_file.as_raw_fd(),
+			KEYMAP.len().try_into().unwrap(),
+		);
+
+		Self { inner, serial: 0 }
+	}
+
+	fn next_serial(&mut self) -> u32 {
+		let ret = self.serial;
+		self.serial += 1;
+		ret
+	}
+
+	fn key_raw(&mut self, key: u32, pressed: bool) {
+		let state = if pressed {
+			KeyState::Pressed
+		} else {
+			KeyState::Released
+		} as u32;
+		let serial = self.next_serial();
+		self.inner.key(serial, key, state);
+	}
+
+	fn key(&mut self, key: u32) {
+		self.key_raw(key, true);
+		self.key_raw(key, false);
+	}
+
+	fn set_modifiers(&self, ctrl: bool, shift: bool) {
+		let mut modifiers = 0;
+		if ctrl {
+			modifiers |= MOD_CONTROL;
+		}
+		if shift {
+			modifiers |= MOD_SHIFT;
+		}
+		self.inner.modifiers(modifiers, MOD_NONE, MOD_NONE, GROUP);
+	}
+
+	fn reset_modifiers(&self) {
+		self.set_modifiers(false, false);
+	}
+
+	fn has_ascii(byte: u8) -> bool {
+		(8..=126).contains(&byte)
+	}
+
+	fn type_ascii(&mut self, ascii: u8) {
+		debug_assert!(Self::has_ascii(ascii), "out of viable ASCII range");
+		let key = u32::from(ascii) - KEYCODE_BASE;
+		self.key(key);
+	}
+
+	fn type_unicode(&mut self, ch: char) {
+		self.set_modifiers(true, true);
+		self.type_ascii(b'u');
+		self.reset_modifiers();
+		self.type_ascii(b'0');
+		self.type_ascii(b'x');
+		let mut buf = [b'\0'; 8];
+		write!(&mut buf.as_mut_slice(), "{:x}", u32::from(ch)).unwrap();
+		for ch in buf.into_iter().take_while(|&b| b != b'\0') {
+			self.type_ascii(ch);
+		}
+		self.type_ascii(b'\n');
+	}
+
+	fn backspace(&mut self) {
+		self.type_ascii(BACKSPACE);
+	}
+
+	fn type_str(&mut self, s: &str) {
+		for ch in s.chars() {
+			if let Some(byte) = u8::try_from(ch).ok().filter(|&b| Self::has_ascii(b)) {
+				self.type_ascii(byte);
+			} else {
+				self.type_unicode(ch);
+			}
+		}
+	}
+}
 
 pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 	let device_path = args.device.unwrap_or_else(discover_device);
@@ -215,25 +314,9 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 	let handle = queue.handle();
 
 	let keyboard = manager.create_virtual_keyboard(&seat, &handle, ());
+	let mut keyboard = Keyboard::new(keyboard);
 
 	queue.roundtrip(&mut App).unwrap();
-
-	let keymap_file = MemfdOptions::new()
-		.allow_sealing(true)
-		.close_on_exec(true)
-		.create("sordahe-keymap")
-		.unwrap();
-	keymap_file.as_file().write_all(KEYMAP.as_bytes()).unwrap();
-
-	keyboard.keymap(
-		KeymapFormat::XkbV1 as u32,
-		keymap_file.as_raw_fd(),
-		KEYMAP.len().try_into().unwrap(),
-	);
-
-	queue.roundtrip(&mut App).unwrap();
-
-	let mut key_serial = 0;
 
 	for keys in device {
 		let output = steno.handle_keys(keys);
@@ -241,36 +324,18 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 			Output::Normal { delete, append } => {
 				match delete {
 					Deletion::Word => {
-						keyboard.modifiers(MOD_CONTROL, MOD_NONE, MOD_NONE, GROUP);
-						keyboard.key(key_serial, BACKSPACE, KeyState::Pressed as u32);
-						key_serial += 1;
-						keyboard.key(key_serial, BACKSPACE, KeyState::Released as u32);
-						key_serial += 1;
-						keyboard.modifiers(MOD_NONE, MOD_NONE, MOD_NONE, GROUP);
+						keyboard.set_modifiers(true, false);
+						keyboard.backspace();
+						keyboard.reset_modifiers();
 					}
 					Deletion::Exact(n) => {
 						for _ in 0..n {
-							keyboard.key(key_serial, BACKSPACE, KeyState::Pressed as u32);
-							key_serial += 1;
-							keyboard.key(key_serial, BACKSPACE, KeyState::Released as u32);
-							key_serial += 1;
-							// So the queue doesn't get too big.
-							queue.dispatch_pending(&mut App).unwrap();
+							keyboard.backspace();
 						}
 					}
 				}
 
-				for ch in append.chars() {
-					let byte = u8::try_from(ch).expect("utf8 not yet supported");
-					let key = u32::from(byte) - KEYCODE_BASE;
-
-					keyboard.key(key_serial, key, KeyState::Pressed as u32);
-					key_serial += 1;
-					keyboard.key(key_serial, key, KeyState::Released as u32);
-					key_serial += 1;
-
-					queue.dispatch_pending(&mut App).unwrap();
-				}
+				keyboard.type_str(&append);
 
 				queue.roundtrip(&mut App).unwrap();
 			}
