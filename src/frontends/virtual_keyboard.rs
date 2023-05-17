@@ -319,6 +319,7 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 	queue.roundtrip(&mut App).unwrap();
 
 	for keys in device {
+		eprintln!("{keys:#}");
 		let output = steno.handle_keys(keys);
 		match output {
 			Output::Normal { delete, append } => {

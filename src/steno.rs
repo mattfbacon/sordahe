@@ -63,7 +63,6 @@ impl Steno {
 	}
 
 	pub fn handle_keys(&mut self, keys: Keys) -> Output {
-		eprintln!("{keys:#}");
 		let action = self.find_action(keys);
 		self.run_action(action)
 	}

@@ -34,7 +34,9 @@ impl App {
 	fn key_released(&mut self, key: Key) {
 		self.keys_current &= !key;
 		if self.keys_current.is_empty() && !self.keys_seen.is_empty() {
-			let output = self.steno.handle_keys(std::mem::take(&mut self.keys_seen));
+			let keys = std::mem::take(&mut self.keys_seen);
+			eprintln!("{keys:#}");
+			let output = self.steno.handle_keys(keys);
 			self.run_output(output);
 		}
 	}
