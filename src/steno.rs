@@ -13,6 +13,15 @@ struct InputState {
 	prev_was_glue: bool,
 }
 
+impl InputState {
+	const INITIAL: Self = Self {
+		caps: Some(true),
+		space: false,
+		carry_to_next: false,
+		prev_was_glue: false,
+	};
+}
+
 #[derive(Debug)]
 struct InputEvent {
 	strokes: Strokes,
@@ -52,12 +61,7 @@ impl Steno {
 	pub fn new(dict: Dict) -> Self {
 		Self {
 			dict,
-			state: InputState {
-				caps: Some(true),
-				space: false,
-				carry_to_next: false,
-				prev_was_glue: false,
-			},
+			state: InputState::INITIAL,
 			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
 		}
 	}
