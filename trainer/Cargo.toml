@@ -1,0 +1,10 @@
+[package]
+name = "tt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.21"
+egui = "0.21"
+egui_file = "0.8"
+rand = "0.8"
