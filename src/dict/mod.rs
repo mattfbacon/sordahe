@@ -38,7 +38,9 @@ impl<'de> Deserialize<'de> for Dict {
 
 				while let Some((key, value)) = access.next_entry::<Strokes, Entry>()? {
 					if let Some(old) = map.get(&key) {
-						panic!("overlap on {key}; prev was {old:?}, current is {value:?}",);
+						return Err(serde::de::Error::custom(format!(
+							"overlap on {key}; prev was {old:?}, current is {value:?}"
+						)));
 					}
 					max_strokes = max_strokes.max(key.num_strokes());
 					map.insert(key, value);
