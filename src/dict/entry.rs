@@ -1,7 +1,6 @@
 use std::rc::Rc;
 use std::str::FromStr;
 
-use logos::Logos;
 use paste::paste;
 use serde_with::DeserializeFromStr;
 use thiserror::Error;
@@ -73,7 +72,7 @@ impl SpecialPunct {
 	}
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Part {
 	Verbatim(Box<str>),
 	SpecialPunct(SpecialPunct),
@@ -86,8 +85,10 @@ pub enum Part {
 
 #[derive(Debug, Error)]
 pub enum ParseError {
-	#[error("lexer error on {0:?}")]
-	Lex(Box<str>),
+	#[error("unclosed bracket")]
+	UnclosedBracket,
+	#[error("pointless brackets around {0:?}")]
+	PointlessBrackets(Box<str>),
 	#[error(transparent)]
 	PloverCommand(#[from] PloverCommandFromStrError),
 	#[error(transparent)]
@@ -121,97 +122,155 @@ fn unescape(escaped: &str) -> Result<Box<str>, UnescapeError> {
 	Ok(ret.into())
 }
 
+trait StrExt {
+	fn find_with_escapes(&self, pattern: char) -> Option<usize>;
+}
+
+impl StrExt for str {
+	fn find_with_escapes(&self, pattern: char) -> Option<usize> {
+		debug_assert!(pattern != '\\');
+		let mut escape = false;
+		for (idx, ch) in self.char_indices() {
+			if escape {
+				escape = false;
+			} else if ch == '\\' {
+				escape = true;
+			} else if ch == pattern {
+				return Some(idx);
+			}
+		}
+		None
+	}
+}
+
+#[test]
+fn test_find_unescaped() {
+	assert_eq!("abc".find_with_escapes('b'), Some(1));
+	assert_eq!(r"a\bc".find_with_escapes('b'), None);
+	assert_eq!(r"a\\bc".find_with_escapes('b'), Some(3));
+}
+
+macro_rules! push_verbatim {
+	($out:expr, $s:expr) => {{
+		let trimmed = $s.trim();
+		if !trimmed.is_empty() {
+			$out.push(Part::Verbatim(unescape(trimmed)?));
+		}
+	}};
+}
+
+fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
+	const AFFIXES: &[(&str, Part)] = &[
+		(">", Part::SetCaps(false)),
+		("-|", Part::SetCaps(true)),
+		("^", Part::SetSpace(false)),
+		(" ", Part::SetSpace(true)),
+		("~|", Part::CarryToNext),
+		("&", Part::Glue),
+	];
+
+	let mut is_pointless = true;
+
+	if let Some(command) = inner.strip_prefix("PLOVER:") {
+		out.push(Part::PloverCommand(command.parse()?));
+		return Ok(());
+	} else if let Ok(punct) = inner.parse::<SpecialPunct>() {
+		out.push(Part::SpecialPunct(punct));
+		return Ok(());
+	}
+
+	let mut rest = inner;
+
+	loop {
+		let mut done = true;
+
+		for (pat, part) in AFFIXES {
+			if let Some(new_rest) = rest.strip_prefix(pat) {
+				done = false;
+				out.push(part.clone());
+				rest = new_rest;
+				is_pointless = false;
+			}
+		}
+
+		if done {
+			break;
+		}
+	}
+
+	let suffix_start = out.len();
+
+	loop {
+		let mut done = true;
+
+		for (pat, part) in AFFIXES {
+			if let Some(new_rest) = rest
+				.strip_suffix(pat)
+				.filter(|new_rest| !new_rest.ends_with('\\'))
+			{
+				done = false;
+				out.push(part.clone());
+				rest = new_rest;
+				is_pointless = false;
+			}
+		}
+
+		if done {
+			break;
+		}
+	}
+
+	push_verbatim!(out, rest);
+
+	out[suffix_start..].reverse();
+
+	if is_pointless {
+		return Err(ParseError::PointlessBrackets(inner.into()));
+	}
+
+	Ok(())
+}
+
 impl FromStr for Entry {
 	type Err = ParseError;
 
 	fn from_str(entry: &str) -> Result<Self, Self::Err> {
-		#[derive(Logos)]
-		enum EntryToken {
-			#[regex(r"([^{]|\\\{)+")]
-			Verbatim,
-			#[regex(r"\{([^}\\]|\\.)*\}")]
-			Special,
+		let mut out = Vec::with_capacity(1);
+
+		let mut rest = entry;
+
+		while let Some(special_start) = rest.find_with_escapes('{') {
+			let before = &rest[..special_start];
+			push_verbatim!(out, before);
+
+			rest = &rest[special_start + 1..];
+			let special_end = rest
+				.find_with_escapes('}')
+				.ok_or(ParseError::UnclosedBracket)?;
+			let special = &rest[..special_end];
+			rest = &rest[special_end + 1..];
+
+			parse_special(&mut out, special)?;
 		}
 
-		let mut ret = Vec::with_capacity(1);
+		push_verbatim!(out, rest);
 
-		for (token, span) in EntryToken::lexer(entry).spanned() {
-			match token.map_err(|_| ParseError::Lex(entry[span.clone()].into()))? {
-				EntryToken::Verbatim => {
-					let text = entry[span].trim();
-					if !text.is_empty() {
-						ret.push(Part::Verbatim(unescape(text)?));
-					}
-				}
-				EntryToken::Special => {
-					let inner = &entry[span.start + 1..span.end - 1];
-					let part = match inner {
-						"-|" => Part::SetCaps(true),
-						">" => Part::SetCaps(false),
-						"^" => Part::SetSpace(false),
-						" " => Part::SetSpace(true),
-						_ => {
-							if let Some(command) = inner.strip_prefix("PLOVER:") {
-								Part::PloverCommand(command.parse()?)
-							} else if let Ok(punct) = inner.parse::<SpecialPunct>() {
-								Part::SpecialPunct(punct)
-							} else {
-								let (strip_before, inner) = inner
-									.strip_prefix('^')
-									.map_or((false, inner), |inner| (true, inner));
-								let (carry_to_next, inner) = inner
-									.strip_prefix("~|")
-									.map_or((false, inner), |inner| (true, inner));
-								let (glue, inner) = inner
-									.strip_prefix('&')
-									.map_or((false, inner), |inner| (true, inner));
-
-								let (strip_after, inner) = inner
-									.strip_suffix('^')
-									.filter(|inner| !inner.ends_with('\\'))
-									.map_or((false, inner), |inner| (true, inner));
-
-								if !(strip_before || carry_to_next || glue || strip_after) {
-									eprintln!("warn: pointless curlies around {inner:?}; treating as verbatim");
-								}
-
-								if strip_before {
-									ret.push(Part::SetSpace(false));
-								}
-								if carry_to_next {
-									ret.push(Part::CarryToNext);
-								}
-								if glue {
-									ret.push(Part::Glue);
-								}
-
-								ret.push(Part::Verbatim(unescape(inner)?));
-
-								if strip_after {
-									ret.push(Part::SetSpace(false));
-								}
-
-								continue;
-							}
-						}
-					};
-					ret.push(part);
-				}
-			}
-		}
-
-		Ok(Self(ret.into()))
+		Ok(Self(out.into()))
 	}
 }
 
 #[test]
 fn test_parse_entry() {
 	assert_eq!(
-		&r"{>} {&p\^}".parse::<Entry>().unwrap().0 as &[_],
+		&r"\{{>}\} {&p\^-|} abc".parse::<Entry>().unwrap().0 as &[_],
 		&[
+			Part::Verbatim("{".into()),
 			Part::SetCaps(false),
+			Part::Verbatim("}".into()),
 			Part::Glue,
 			Part::Verbatim("p^".into()),
+			Part::SetCaps(true),
+			Part::Verbatim("abc".into()),
 		],
 	);
 }
