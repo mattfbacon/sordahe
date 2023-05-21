@@ -152,9 +152,9 @@ fn test_find_unescaped() {
 
 macro_rules! push_verbatim {
 	($out:expr, $s:expr) => {{
-		let trimmed = $s.trim();
-		if !trimmed.is_empty() {
-			$out.push(Part::Verbatim(unescape(trimmed)?));
+		let s = $s;
+		if !s.is_empty() {
+			$out.push(Part::Verbatim(unescape(s)?));
 		}
 	}};
 }
@@ -164,7 +164,6 @@ fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
 		(">", Part::SetCaps(false)),
 		("-|", Part::SetCaps(true)),
 		("^", Part::SetSpace(false)),
-		(" ", Part::SetSpace(true)),
 		("~|", Part::CarryToNext),
 		("&", Part::Glue),
 	];
@@ -176,6 +175,9 @@ fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
 		return Ok(());
 	} else if let Ok(punct) = inner.parse::<SpecialPunct>() {
 		out.push(Part::SpecialPunct(punct));
+		return Ok(());
+	} else if inner == " " {
+		out.push(Part::Verbatim(" ".into()));
 		return Ok(());
 	}
 
@@ -241,7 +243,7 @@ impl FromStr for Entry {
 
 		while let Some(special_start) = rest.find_with_escapes('{') {
 			let before = &rest[..special_start];
-			push_verbatim!(out, before);
+			push_verbatim!(out, before.trim());
 
 			rest = &rest[special_start + 1..];
 			let special_end = rest
@@ -253,7 +255,7 @@ impl FromStr for Entry {
 			parse_special(&mut out, special)?;
 		}
 
-		push_verbatim!(out, rest);
+		push_verbatim!(out, rest.trim());
 
 		Ok(Self(out.into()))
 	}
@@ -272,6 +274,14 @@ fn test_parse_entry() {
 			Part::SetCaps(true),
 			Part::Verbatim("abc".into()),
 		],
+	);
+	assert_eq!(
+		&r"{^ ^}".parse::<Entry>().unwrap().0 as &[_],
+		&[
+			Part::SetSpace(false),
+			Part::Verbatim(" ".into()),
+			Part::SetSpace(false)
+		]
 	);
 }
 
