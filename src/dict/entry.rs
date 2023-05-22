@@ -208,7 +208,7 @@ fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
 		for (pat, part) in AFFIXES {
 			if let Some(new_rest) = rest
 				.strip_suffix(pat)
-				.filter(|new_rest| !new_rest.ends_with('\\'))
+				.filter(|new_rest| new_rest.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
 			{
 				done = false;
 				out.push(part.clone());
@@ -280,8 +280,16 @@ fn test_parse_entry() {
 		&[
 			Part::SetSpace(false),
 			Part::Verbatim(" ".into()),
-			Part::SetSpace(false)
+			Part::SetSpace(false),
 		]
+	);
+	assert_eq!(
+		&r"{\\^}".parse::<Entry>().unwrap().0 as &[_],
+		&[Part::Verbatim("\\".into()), Part::SetSpace(false)]
+	);
+	assert_eq!(
+		&r"{^\\\\\^}".parse::<Entry>().unwrap().0 as &[_],
+		&[Part::SetSpace(false), Part::Verbatim(r"\\^".into())]
 	);
 }
 
