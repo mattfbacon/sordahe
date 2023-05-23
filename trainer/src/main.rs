@@ -107,6 +107,7 @@ struct App {
 	open_words: FileDialog,
 	last_word_time: Option<Instant>,
 	wpm: RollingAverage,
+	was_correct: bool,
 }
 
 impl App {
@@ -117,6 +118,7 @@ impl App {
 				.show_new_folder(false),
 			last_word_time: None,
 			wpm: RollingAverage::new(10),
+			was_correct: false,
 		}
 	}
 }
@@ -182,12 +184,19 @@ impl eframe::App for App {
 					let word = words.current();
 					ui.heading(word);
 					ui.text_edit_singleline(&mut words.type_buf);
-					if words.is_correct() {
+					let is_correct = words.is_correct();
+					if is_correct && self.was_correct {
 						words.next();
 						if let Some(last) = self.last_word_time {
 							self.wpm.push(last.elapsed().as_secs_f32().recip())
 						}
 						self.last_word_time = Some(Instant::now());
+						self.was_correct = false;
+					} else {
+						self.was_correct = is_correct;
+						if is_correct {
+							ctx.request_repaint_after(std::time::Duration::from_millis(50));
+						}
 					}
 				});
 			}
