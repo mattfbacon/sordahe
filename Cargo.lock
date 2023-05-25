@@ -667,6 +667,7 @@ version = "0.1.0"
 dependencies = [
  "argh",
  "memfd",
+ "once_cell",
  "paste",
  "serde",
  "serde_json",

@@ -5,6 +5,8 @@ use crate::dict::{Entry, EntryPart, PloverCommand, Strokes};
 use crate::keys::{Key, Keys};
 
 mod orthography;
+#[cfg(test)]
+mod test;
 
 pub trait Dict {
 	fn get(&self, keys: &[Keys]) -> Option<Entry>;
