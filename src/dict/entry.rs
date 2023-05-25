@@ -286,15 +286,15 @@ fn test_parse_entry() {
 			Part::SetSpace(false),
 			Part::Verbatim(" ".into()),
 			Part::SetSpace(false),
-		]
+		],
 	);
 	assert_eq!(
 		&r"{\\^}".parse::<Entry>().unwrap().0 as &[_],
-		&[Part::Verbatim("\\".into()), Part::SetSpace(false)]
+		&[Part::Verbatim("\\".into()), Part::SetSpace(false)],
 	);
 	assert_eq!(
 		&r"{^\\\\\^}".parse::<Entry>().unwrap().0 as &[_],
-		&[Part::SetSpace(false), Part::Verbatim(r"\\^".into())]
+		&[Part::SetSpace(false), Part::Verbatim(r"\\^".into())],
 	);
 }
 
