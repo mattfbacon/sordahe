@@ -178,6 +178,15 @@ impl Keys {
 	pub const fn contains(self, key: Key) -> bool {
 		self.0 & Keys::single(key).0 > 0
 	}
+
+	pub fn remove(&mut self, keys: impl Into<Keys>) -> bool {
+		let keys = keys.into();
+		let contains = (*self & keys) == keys;
+		if contains {
+			*self &= !keys;
+		}
+		contains
+	}
 }
 
 #[test]
