@@ -170,14 +170,18 @@ fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
 
 	let mut is_pointless = true;
 
-	if let Some(command) = inner.strip_prefix("PLOVER:") {
-		out.push(Part::PloverCommand(command.parse()?));
-		return Ok(());
-	} else if let Ok(punct) = inner.parse::<SpecialPunct>() {
-		out.push(Part::SpecialPunct(punct));
-		return Ok(());
-	} else if inner == " " {
-		out.push(Part::Verbatim(" ".into()));
+	'precheck: {
+		let part = if let Some(command) = inner.strip_prefix("PLOVER:") {
+			Part::PloverCommand(command.parse()?)
+		} else if let Ok(punct) = inner.parse::<SpecialPunct>() {
+			Part::SpecialPunct(punct)
+		} else if inner == " " {
+			Part::Verbatim(" ".into())
+		} else {
+			break 'precheck;
+		};
+
+		out.push(part);
 		return Ok(());
 	}
 
