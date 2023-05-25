@@ -96,7 +96,7 @@ pub enum ParseError {
 	Unescape(#[from] UnescapeError),
 }
 
-#[derive(Debug, Error)]
+#[derive(Clone, Copy, Debug, Error)]
 pub enum UnescapeError {
 	#[error("unexpected EOF after backslash; expected escape")]
 	UnexpectedEof,
