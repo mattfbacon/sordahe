@@ -12,7 +12,7 @@ use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::{
 
 use crate::args::InputMethodArgs;
 use crate::keys::{Key, Keys};
-use crate::steno::{Deletion, Output as StenoOutput, Steno};
+use crate::steno::{Output, SpecialAction, Steno};
 
 #[derive(Debug)]
 pub struct App {
@@ -41,19 +41,21 @@ impl App {
 		}
 	}
 
-	fn run_output(&mut self, output: StenoOutput) {
+	fn run_output(&mut self, output: Result<Output, SpecialAction>) {
 		match output {
-			StenoOutput::Normal { delete, append } => {
-				let delete = match delete {
-					// We can't do any better as an input method, unfortunately.
-					Deletion::Word => 1,
-					Deletion::Exact(v) => v,
-				};
-				self.input.delete_surrounding_text(delete, 0);
+			Ok(Output {
+				delete_words,
+				delete,
+				append,
+			}) => {
+				// We want to delete words, but this isn't really possible as an input method, so we'll delete a single character instead.
+				self
+					.input
+					.delete_surrounding_text((delete_words + delete).try_into().unwrap(), 0);
 				self.input.commit_string(append);
 				self.input.commit(self.serial);
 			}
-			StenoOutput::Quit => {
+			Err(SpecialAction::Quit) => {
 				self.should_exit = true;
 			}
 		}

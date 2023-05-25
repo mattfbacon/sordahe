@@ -13,7 +13,7 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboar
 
 use crate::args::{StenoProtocol, VirtualKeyboardArgs};
 use crate::keys::{Key, Keys};
-use crate::steno::{Deletion, Output, Steno};
+use crate::steno::{Output, SpecialAction, Steno};
 
 struct NeededProxies {
 	manager: Option<ZwpVirtualKeyboardManagerV1>,
@@ -322,25 +322,26 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 		eprintln!("{keys:#}");
 		let output = steno.handle_keys(keys);
 		match output {
-			Output::Normal { delete, append } => {
-				match delete {
-					Deletion::Word => {
-						keyboard.set_modifiers(true, false);
-						keyboard.backspace();
-						keyboard.reset_modifiers();
-					}
-					Deletion::Exact(n) => {
-						for _ in 0..n {
-							keyboard.backspace();
-						}
-					}
+			Ok(Output {
+				delete_words,
+				delete,
+				append,
+			}) => {
+				for _ in 0..delete {
+					keyboard.backspace();
 				}
+
+				keyboard.set_modifiers(true, false);
+				for _ in 0..delete_words {
+					keyboard.backspace();
+				}
+				keyboard.reset_modifiers();
 
 				keyboard.type_str(&append);
 
 				queue.roundtrip(&mut App).unwrap();
 			}
-			Output::Quit => break,
+			Err(SpecialAction::Quit) => break,
 		}
 	}
 }

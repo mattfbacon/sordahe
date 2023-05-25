@@ -1,7 +1,10 @@
 use std::collections::VecDeque;
 
+use self::orthography::apply_orthography_rules;
 use crate::dict::{Entry, EntryPart, PloverCommand, Strokes};
 use crate::keys::{Key, Keys};
+
+mod orthography;
 
 pub trait Dict {
 	fn get(&self, keys: &[Keys]) -> Option<Entry>;
@@ -48,7 +51,7 @@ impl InputState {
 #[derive(Debug)]
 struct InputEvent {
 	strokes: Strokes,
-	len: usize,
+	text: String,
 	state_before: InputState,
 }
 
@@ -64,20 +67,49 @@ struct Action {
 	entry: Entry,
 	strokes: Strokes,
 	pop_backlog: usize,
-	to_delete: u32,
+	to_delete: usize,
 	restore_state: Option<InputState>,
 }
 
 #[derive(Debug)]
-pub enum Deletion {
-	Word,
-	Exact(u32),
+pub enum SpecialAction {
+	Quit,
 }
 
 #[derive(Debug)]
-pub enum Output {
-	Normal { delete: Deletion, append: String },
-	Quit,
+pub struct Output {
+	pub delete_words: usize,
+	pub delete: usize,
+	pub append: String,
+}
+
+impl Output {
+	fn new(delete: usize) -> Self {
+		Self {
+			delete_words: 0,
+			delete,
+			append: String::new(),
+		}
+	}
+
+	fn delete(&mut self, amount: usize) {
+		if amount <= self.append.len() {
+			self.append.truncate(self.append.len() - amount);
+		} else {
+			self.delete += amount - self.append.len();
+			self.append.clear();
+		}
+	}
+
+	fn append(&mut self, text: &str) {
+		self.append += text;
+	}
+
+	fn replace(&mut self, old_len: usize, new: &str) {
+		// TODO Implement common-prefix optimization to avoid deleting and retyping the same text.
+		self.delete(old_len);
+		self.append(new);
+	}
 }
 
 fn make_numbers(mut keys: Keys) -> Option<String> {
@@ -158,7 +190,7 @@ impl<D: Dict> Steno<D> {
 		}
 	}
 
-	pub fn handle_keys(&mut self, keys: Keys) -> Output {
+	pub fn handle_keys(&mut self, keys: Keys) -> Result<Output, SpecialAction> {
 		let action = self.find_action(keys);
 		self.run_action(action)
 	}
@@ -209,10 +241,8 @@ impl<D: Dict> Steno<D> {
 					pop_backlog: these_events.len(),
 					to_delete: these_events
 						.clone()
-						.map(|event| event.len)
-						.sum::<usize>()
-						.try_into()
-						.unwrap(),
+						.map(|event| event.text.len())
+						.sum::<usize>(),
 					restore_state: event.map(|event| event.state_before),
 				};
 			}
@@ -224,21 +254,33 @@ impl<D: Dict> Steno<D> {
 		make_fallback_action(this_keys)
 	}
 
-	fn run_part(&mut self, part: &EntryPart, buf: &mut String) -> Result<bool, PloverCommand> {
+	fn run_part(&mut self, part: &EntryPart, output: &mut Output) -> Result<bool, PloverCommand> {
 		let mut seen_glue = false;
 
 		match part {
-			EntryPart::Verbatim(text) => {
+			EntryPart::Verbatim(text) => 'block: {
 				if self.state.space {
-					*buf += " ";
+					output.append(" ");
+				} else {
+					let before = Some(output.append.as_str())
+						.filter(|buf| !buf.is_empty())
+						.or(self.backlog.back().map(|event| &*event.text))
+						.unwrap_or("");
+					if let Some(combined) = apply_orthography_rules(before, text) {
+						output.replace(before.len(), &combined);
+						break 'block;
+					}
 				}
 
-				let first_pos = buf.len();
-				*buf += text;
+				let first_pos = output.append.len();
+				output.append(text);
 
 				if let Some(caps) = self.state.caps {
-					let first_len = buf[first_pos..].chars().next().map_or(0, char::len_utf8);
-					let first = &mut buf[first_pos..][..first_len];
+					let first_len = output.append[first_pos..]
+						.chars()
+						.next()
+						.map_or(0, char::len_utf8);
+					let first = &mut output.append[first_pos..][..first_len];
 
 					if caps {
 						first.make_ascii_uppercase();
@@ -253,7 +295,7 @@ impl<D: Dict> Steno<D> {
 				}
 			}
 			EntryPart::SpecialPunct(punct) => {
-				*buf += punct.as_str();
+				output.append(punct.as_str());
 				self.state.space = true;
 				self.state.caps = if punct.is_sentence_end() {
 					Some(true)
@@ -279,10 +321,11 @@ impl<D: Dict> Steno<D> {
 			}
 			EntryPart::PloverCommand(command) => return Err(*command),
 		}
+
 		Ok(seen_glue)
 	}
 
-	fn run_action(&mut self, action: Action) -> Output {
+	fn run_action(&mut self, action: Action) -> Result<Output, SpecialAction> {
 		self
 			.backlog
 			.truncate(self.backlog.len() - action.pop_backlog);
@@ -293,31 +336,26 @@ impl<D: Dict> Steno<D> {
 
 		let state_before = self.state;
 
-		let mut buf = String::new();
+		let mut output = Output::new(action.to_delete);
 
 		let mut seen_glue = false;
 		for part in &*action.entry.0 {
-			let res = self.run_part(part, &mut buf);
+			let res = self.run_part(part, &mut output);
 			match res {
 				Ok(seen_glue_in_this) => {
 					seen_glue |= seen_glue_in_this;
 				}
 				Err(PloverCommand::Backspace) => {
-					assert!(buf.is_empty(), "cannot mix backspace with text");
 					let prev = self.backlog.pop_back();
 					if let Some(prev) = &prev {
 						self.state = prev.state_before;
+						output.delete += prev.text.len();
+					} else {
+						output.delete_words += 1;
 					}
-					let delete = prev.map_or(Deletion::Word, |prev| {
-						Deletion::Exact(prev.len.try_into().unwrap())
-					});
-					return Output::Normal {
-						delete,
-						append: String::new(),
-					};
 				}
 				Err(PloverCommand::Quit) => {
-					return Output::Quit;
+					return Err(SpecialAction::Quit);
 				}
 			}
 		}
@@ -326,15 +364,14 @@ impl<D: Dict> Steno<D> {
 		self
 			.backlog
 			.drain(..self.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
-		self.backlog.push_back(InputEvent {
-			strokes: action.strokes,
-			len: buf.len(),
-			state_before,
-		});
-
-		Output::Normal {
-			delete: Deletion::Exact(action.to_delete),
-			append: buf,
+		if !output.append.is_empty() {
+			self.backlog.push_back(InputEvent {
+				strokes: action.strokes,
+				text: output.append.clone(),
+				state_before,
+			});
 		}
+
+		Ok(output)
 	}
 }
