@@ -1,8 +1,9 @@
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{self, BufRead as _, BufReader};
+use std::io::{self, BufRead as _, BufReader, Write};
 use std::ops::Range;
 use std::path::Path;
+use std::process::{Child, Command, Stdio};
 use std::time::Instant;
 
 use egui::{Align2, DragValue, Frame, Vec2};
@@ -107,6 +108,7 @@ struct App {
 	open_words: FileDialog,
 	last_word_time: Option<Instant>,
 	wpm: RollingAverage,
+	player: Child,
 	was_correct: bool,
 }
 
@@ -118,6 +120,11 @@ impl App {
 				.show_new_folder(false),
 			last_word_time: None,
 			wpm: RollingAverage::new(10),
+			player: Command::new("espeak")
+				.args(["-v", "mb/mb-us1"])
+				.stdin(Stdio::piped())
+				.spawn()
+				.unwrap(),
 			was_correct: false,
 		}
 	}
@@ -187,6 +194,20 @@ impl eframe::App for App {
 					let is_correct = words.is_correct();
 					if is_correct && self.was_correct {
 						words.next();
+						self
+							.player
+							.stdin
+							.as_mut()
+							.unwrap()
+							.write_all(words.current().as_bytes())
+							.unwrap();
+						self
+							.player
+							.stdin
+							.as_mut()
+							.unwrap()
+							.write_all(b"\n")
+							.unwrap();
 						if let Some(last) = self.last_word_time {
 							self.wpm.push(last.elapsed().as_secs_f32().recip())
 						}
