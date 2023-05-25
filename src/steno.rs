@@ -108,9 +108,13 @@ fn make_numbers(mut keys: Keys) -> Option<String> {
 	Some(String::from_utf8(ret).unwrap())
 }
 
-fn make_simple_action(text: Box<str>, keys: Keys) -> Action {
+fn make_text_action(text: Box<str>, keys: Keys) -> Action {
+	make_simple_action(vec![EntryPart::Verbatim(text)].into(), keys)
+}
+
+fn make_simple_action(entry: Entry, keys: Keys) -> Action {
 	Action {
-		entry: vec![EntryPart::Verbatim(text)].into(),
+		entry,
 		strokes: vec![keys].into(),
 		pop_backlog: 0,
 		to_delete: 0,
@@ -119,7 +123,7 @@ fn make_simple_action(text: Box<str>, keys: Keys) -> Action {
 }
 
 fn make_fallback_action(keys: Keys) -> Action {
-	make_simple_action(keys.to_string().into(), keys)
+	make_text_action(keys.to_string().into(), keys)
 }
 
 impl Steno {
@@ -140,7 +144,14 @@ impl Steno {
 		if this_keys.contains(Key::NumberBar) {
 			return make_numbers(this_keys).map_or_else(
 				|| make_fallback_action(this_keys),
-				|text| make_simple_action(text.into(), this_keys),
+				|text| {
+					let entry = if text.bytes().all(|b| b.is_ascii_digit()) {
+						vec![EntryPart::Glue, EntryPart::Verbatim(text.into())]
+					} else {
+						vec![EntryPart::Verbatim(text.into())]
+					};
+					make_simple_action(entry.into(), this_keys)
+				},
 			);
 		}
 
