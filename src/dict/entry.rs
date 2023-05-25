@@ -1,3 +1,4 @@
+use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -303,5 +304,19 @@ pub struct Entry(pub Arc<[Part]>);
 impl From<Vec<Part>> for Entry {
 	fn from(parts: Vec<Part>) -> Self {
 		Self(parts.into())
+	}
+}
+
+impl Add<&Entry> for &Entry {
+	type Output = Entry;
+
+	fn add(self, other: &Entry) -> Entry {
+		self
+			.0
+			.iter()
+			.cloned()
+			.chain(other.0.iter().cloned())
+			.collect::<Vec<_>>()
+			.into()
 	}
 }
