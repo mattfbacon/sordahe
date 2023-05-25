@@ -1,7 +1,30 @@
 use std::collections::VecDeque;
 
-use crate::dict::{Dict, Entry, EntryPart, PloverCommand, Strokes};
+use crate::dict::{Entry, EntryPart, PloverCommand, Strokes};
 use crate::keys::{Key, Keys};
+
+pub trait Dict {
+	fn get(&self, keys: &[Keys]) -> Option<Entry>;
+	fn max_strokes(&self) -> usize;
+}
+
+// ...
+impl AsRef<Self> for crate::dict::Dict {
+	fn as_ref(&self) -> &Self {
+		self
+	}
+}
+
+impl<T: AsRef<crate::dict::Dict>> Dict for T {
+	fn get(&self, keys: &[Keys]) -> Option<Entry> {
+		// Cheap ref-counted clone.
+		self.as_ref().get(keys).cloned()
+	}
+
+	fn max_strokes(&self) -> usize {
+		self.as_ref().max_strokes()
+	}
+}
 
 const BACKLOG_DEPTH: usize = 1000;
 
@@ -30,8 +53,8 @@ struct InputEvent {
 }
 
 #[derive(Debug)]
-pub struct Steno {
-	dict: Dict,
+pub struct Steno<D = crate::dict::Dict> {
+	dict: D,
 	state: InputState,
 	backlog: VecDeque<InputEvent>,
 }
@@ -126,8 +149,8 @@ fn make_fallback_action(keys: Keys) -> Action {
 	make_text_action(keys.to_string().into(), keys)
 }
 
-impl Steno {
-	pub fn new(dict: Dict) -> Self {
+impl<D: Dict> Steno<D> {
+	pub fn new(dict: D) -> Self {
 		Self {
 			dict,
 			state: InputState::INITIAL,
@@ -181,7 +204,7 @@ impl Steno {
 			if let Some(entry) = self.dict.get(these_strokes) {
 				all_strokes.drain(..skip);
 				return Action {
-					entry: entry.clone(),
+					entry,
 					strokes: Strokes(all_strokes),
 					pop_backlog: these_events.len(),
 					to_delete: these_events
