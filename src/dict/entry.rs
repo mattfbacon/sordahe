@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use paste::paste;
 use serde_with::DeserializeFromStr;
@@ -294,7 +294,7 @@ fn test_parse_entry() {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, DeserializeFromStr)]
-pub struct Entry(pub Rc<[Part]>);
+pub struct Entry(pub Arc<[Part]>);
 
 impl From<Vec<Part>> for Entry {
 	fn from(parts: Vec<Part>) -> Self {
