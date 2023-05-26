@@ -327,7 +327,7 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 				delete,
 				append,
 			}) => {
-				for _ in 0..delete {
+				for _ in 0..delete.chars {
 					keyboard.backspace();
 				}
 

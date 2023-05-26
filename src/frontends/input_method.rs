@@ -51,7 +51,7 @@ impl App {
 				// We want to delete words, but this isn't really possible as an input method, so we'll delete a single character instead.
 				self
 					.input
-					.delete_surrounding_text((delete_words + delete).try_into().unwrap(), 0);
+					.delete_surrounding_text((delete_words + delete.bytes).try_into().unwrap(), 0);
 				self.input.commit_string(append);
 				self.input.commit(self.serial);
 			}

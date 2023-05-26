@@ -1,9 +1,11 @@
 use std::collections::VecDeque;
 
+use self::chars_or_bytes::CharsOrBytes;
 use self::orthography::apply_orthography_rules;
 use crate::dict::{Entry, EntryPart, PloverCommand, Strokes};
 use crate::keys::{Key, Keys};
 
+mod chars_or_bytes;
 mod orthography;
 #[cfg(test)]
 mod test;
@@ -38,7 +40,7 @@ struct InputState {
 	caps: Option<bool>,
 	space: bool,
 	carry_to_next: bool,
-	prev_was_glue: bool,
+	glue: bool,
 }
 
 impl InputState {
@@ -46,7 +48,7 @@ impl InputState {
 		caps: Some(true),
 		space: false,
 		carry_to_next: false,
-		prev_was_glue: false,
+		glue: false,
 	};
 }
 
@@ -68,9 +70,8 @@ pub struct Steno<D = crate::dict::Dict> {
 struct Action {
 	entry: Entry,
 	strokes: Strokes,
-	pop_backlog: usize,
-	to_delete: usize,
-	restore_state: Option<InputState>,
+	/// The number of backlog entries that must be deleted before applying the entry.
+	delete_before: usize,
 }
 
 #[derive(Debug)]
@@ -81,12 +82,12 @@ pub enum SpecialAction {
 #[derive(Debug)]
 pub struct Output {
 	pub delete_words: usize,
-	pub delete: usize,
+	pub delete: CharsOrBytes,
 	pub append: String,
 }
 
 impl Output {
-	fn new(delete: usize) -> Self {
+	fn new(delete: CharsOrBytes) -> Self {
 		Self {
 			delete_words: 0,
 			delete,
@@ -94,20 +95,26 @@ impl Output {
 		}
 	}
 
-	fn delete(&mut self, amount: usize) {
-		if amount <= self.append.len() {
-			self.append.truncate(self.append.len() - amount);
+	fn delete(&mut self, amount: CharsOrBytes) {
+		if amount.bytes <= self.append.len() {
+			self.append.truncate(self.append.len() - amount.bytes);
 		} else {
-			self.delete += amount - self.append.len();
+			self.delete += amount - CharsOrBytes::for_str(&self.append);
 			self.append.clear();
 		}
+	}
+
+	fn delete_words(&mut self, words: usize) {
+		// XXX check for text in the append buffer and possible delete it by word boundaries.
+		assert!(self.append.is_empty());
+		self.delete_words += words;
 	}
 
 	fn append(&mut self, text: &str) {
 		self.append += text;
 	}
 
-	fn replace(&mut self, old_len: usize, new: &str) {
+	fn replace(&mut self, old_len: CharsOrBytes, new: &str) {
 		// TODO Implement common-prefix optimization to avoid deleting and retyping the same text.
 		self.delete(old_len);
 		self.append(new);
@@ -173,9 +180,7 @@ fn make_simple_action(entry: Entry, keys: Keys) -> Action {
 	Action {
 		entry,
 		strokes: vec![keys].into(),
-		pop_backlog: 0,
-		to_delete: 0,
-		restore_state: None,
+		delete_before: 0,
 	}
 }
 
@@ -240,12 +245,7 @@ impl<D: Dict> Steno<D> {
 				return Action {
 					entry,
 					strokes: Strokes(all_strokes),
-					pop_backlog: these_events.len(),
-					to_delete: these_events
-						.clone()
-						.map(|event| event.text.len())
-						.sum::<usize>(),
-					restore_state: event.map(|event| event.state_before),
+					delete_before: these_events.len(),
 				};
 			}
 			if let Some(event) = event {
@@ -256,9 +256,62 @@ impl<D: Dict> Steno<D> {
 		make_fallback_action(this_keys)
 	}
 
-	fn run_part(&mut self, part: &EntryPart, output: &mut Output) -> Result<bool, PloverCommand> {
-		let mut seen_glue = false;
+	fn run_action(&mut self, action: Action) -> Result<Output, SpecialAction> {
+		let first_removed = self.backlog.len() - action.delete_before;
 
+		if let Some(restore) = self.backlog.get(first_removed) {
+			self.state = restore.state_before;
+		}
+
+		let delete = self
+			.backlog
+			.range(first_removed..)
+			.map(|event| CharsOrBytes::for_str(&event.text))
+			.fold(CharsOrBytes::default(), std::ops::Add::add);
+
+		self.backlog.drain(first_removed..);
+
+		let state_before = self.state;
+		let mut output = Output::new(delete);
+
+		self.state.glue = false;
+
+		for part in &*action.entry.0 {
+			match self.run_part(part, &mut output, state_before.glue) {
+				Ok(()) => {}
+				Err(PloverCommand::Backspace) => {
+					if let Some(prev) = self.backlog.pop_back() {
+						self.state = prev.state_before;
+						output.delete(CharsOrBytes::for_str(&prev.text));
+					} else {
+						output.delete_words(1);
+					}
+				}
+				Err(PloverCommand::Quit) => return Err(SpecialAction::Quit),
+			}
+		}
+
+		if self.backlog.len() == BACKLOG_DEPTH {
+			self.backlog.pop_front();
+		}
+
+		if !output.append.is_empty() {
+			self.backlog.push_back(InputEvent {
+				strokes: action.strokes,
+				text: output.append.clone(),
+				state_before,
+			});
+		}
+
+		Ok(output)
+	}
+
+	fn run_part(
+		&mut self,
+		part: &EntryPart,
+		output: &mut Output,
+		prev_was_glue: bool,
+	) -> Result<(), PloverCommand> {
 		match part {
 			EntryPart::Verbatim(text) => 'block: {
 				if self.state.space {
@@ -269,7 +322,7 @@ impl<D: Dict> Steno<D> {
 						.or(self.backlog.back().map(|event| &*event.text))
 						.unwrap_or("");
 					if let Some(combined) = apply_orthography_rules(before, text) {
-						output.replace(before.len(), &combined);
+						output.replace(CharsOrBytes::for_str(before), &combined);
 						break 'block;
 					}
 				}
@@ -315,65 +368,15 @@ impl<D: Dict> Steno<D> {
 				self.state.carry_to_next = true;
 			}
 			EntryPart::Glue => {
-				if self.state.prev_was_glue {
+				if prev_was_glue {
 					self.state.space = false;
 					self.state.caps = None;
 				}
-				seen_glue = true;
+				self.state.glue = true;
 			}
 			EntryPart::PloverCommand(command) => return Err(*command),
 		}
 
-		Ok(seen_glue)
-	}
-
-	fn run_action(&mut self, action: Action) -> Result<Output, SpecialAction> {
-		self
-			.backlog
-			.truncate(self.backlog.len() - action.pop_backlog);
-
-		if let Some(restore_state) = action.restore_state {
-			self.state = restore_state;
-		}
-
-		let state_before = self.state;
-
-		let mut output = Output::new(action.to_delete);
-
-		let mut seen_glue = false;
-		for part in &*action.entry.0 {
-			let res = self.run_part(part, &mut output);
-			match res {
-				Ok(seen_glue_in_this) => {
-					seen_glue |= seen_glue_in_this;
-				}
-				Err(PloverCommand::Backspace) => {
-					let prev = self.backlog.pop_back();
-					if let Some(prev) = &prev {
-						self.state = prev.state_before;
-						output.delete += prev.text.len();
-					} else {
-						output.delete_words += 1;
-					}
-				}
-				Err(PloverCommand::Quit) => {
-					return Err(SpecialAction::Quit);
-				}
-			}
-		}
-		self.state.prev_was_glue = seen_glue;
-
-		self
-			.backlog
-			.drain(..self.backlog.len().saturating_sub(BACKLOG_DEPTH - 1));
-		if !output.append.is_empty() {
-			self.backlog.push_back(InputEvent {
-				strokes: action.strokes,
-				text: output.append.clone(),
-				state_before,
-			});
-		}
-
-		Ok(output)
+		Ok(())
 	}
 }
