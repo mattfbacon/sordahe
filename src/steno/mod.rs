@@ -414,7 +414,7 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 						|before| {
 							let mut without_rules = [before, text].concat();
 							without_rules.make_ascii_lowercase();
-							if self.word_list.contains(&without_rules) {
+							if self.word_list.contains(without_rules.trim()) {
 								return None;
 							}
 
