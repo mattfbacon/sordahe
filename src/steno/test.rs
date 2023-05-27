@@ -20,7 +20,7 @@ fn steno_to_string(dict: &Dict, input: &[Keys]) -> String {
 				out.truncate(
 					out
 						.len()
-						.checked_sub(delete.bytes)
+						.checked_sub(delete.bytes())
 						.expect("deleted past the beginning"),
 				);
 				out += &append;

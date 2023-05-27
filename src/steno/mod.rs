@@ -96,8 +96,8 @@ impl Output {
 	}
 
 	fn delete(&mut self, amount: CharsOrBytes) {
-		if amount.bytes <= self.append.len() {
-			self.append.truncate(self.append.len() - amount.bytes);
+		if amount.bytes() <= self.append.len() {
+			self.append.truncate(self.append.len() - amount.bytes());
 		} else {
 			self.delete += amount - CharsOrBytes::for_str(&self.append);
 			self.append.clear();

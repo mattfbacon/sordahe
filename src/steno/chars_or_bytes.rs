@@ -2,8 +2,8 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CharsOrBytes {
-	pub chars: usize,
-	pub bytes: usize,
+	chars: usize,
+	bytes: usize,
 }
 
 impl CharsOrBytes {
@@ -12,6 +12,14 @@ impl CharsOrBytes {
 			chars: s.chars().count(),
 			bytes: s.len(),
 		}
+	}
+
+	pub fn chars(self) -> usize {
+		self.chars
+	}
+
+	pub fn bytes(self) -> usize {
+		self.bytes
 	}
 }
 
