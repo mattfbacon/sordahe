@@ -145,6 +145,11 @@ fn make_numbers(mut keys: Keys) -> Option<String> {
 		}
 	}
 
+	// Make sure there is actually at least one number.
+	if ret.is_empty() {
+		return None;
+	}
+
 	if keys.remove(Key::E | Key::U) {
 		ret.reverse();
 	}
@@ -204,17 +209,15 @@ impl<D: Dict> Steno<D> {
 
 	fn find_action(&self, this_keys: Keys) -> Action {
 		if this_keys.contains(Key::NumberBar) {
-			return make_numbers(this_keys).map_or_else(
-				|| make_fallback_action(this_keys),
-				|text| {
-					let entry = if text.bytes().all(|b| b.is_ascii_digit()) {
-						vec![EntryPart::Glue, EntryPart::Verbatim(text.into())]
-					} else {
-						vec![EntryPart::Verbatim(text.into())]
-					};
-					make_simple_action(entry.into(), this_keys)
-				},
-			);
+			if let Some(text) = make_numbers(this_keys) {
+				let entry = if text.bytes().all(|b| b.is_ascii_digit()) {
+					vec![EntryPart::Glue, EntryPart::Verbatim(text.into())]
+				} else {
+					vec![EntryPart::Verbatim(text.into())]
+				};
+
+				return make_simple_action(entry.into(), this_keys);
+			}
 		}
 
 		let max_strokes = self.dict.max_strokes();
