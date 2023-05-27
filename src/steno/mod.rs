@@ -35,6 +35,23 @@ impl<T: AsRef<crate::dict::Dict>> Dict for T {
 	}
 }
 
+pub trait WordList {
+	fn contains(&self, word: &str) -> bool;
+}
+
+// ...
+impl AsRef<Self> for crate::word_list::WordList {
+	fn as_ref(&self) -> &Self {
+		self
+	}
+}
+
+impl<T: AsRef<crate::word_list::WordList>> WordList for T {
+	fn contains(&self, word: &str) -> bool {
+		self.as_ref().contains(word)
+	}
+}
+
 #[derive(Debug)]
 pub enum SpecialAction {
 	Quit,
@@ -47,10 +64,11 @@ pub struct Output {
 	pub append: String,
 }
 
-impl<D: Dict> Steno<D> {
-	pub fn new(dict: D) -> Self {
+impl<D: Dict, W: WordList> Steno<D, W> {
+	pub fn new(dict: D, word_list: W) -> Self {
 		Self {
 			dict,
+			word_list,
 			state: InputState::INITIAL,
 			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
 		}
@@ -93,8 +111,9 @@ struct InputEvent {
 type Backlog = VecDeque<InputEvent>;
 
 #[derive(Debug)]
-pub struct Steno<D = crate::dict::Dict> {
+pub struct Steno<D = crate::dict::Dict, W = crate::word_list::WordList> {
 	dict: D,
+	word_list: W,
 	state: InputState,
 	backlog: Backlog,
 }
@@ -179,7 +198,7 @@ fn make_fallback_action(keys: Keys) -> Action {
 	make_text_action(keys.to_string().into(), keys)
 }
 
-impl<D: Dict> Steno<D> {
+impl<D: Dict, W: WordList> Steno<D, W> {
 	fn find_action(&self, this_keys: Keys) -> Action {
 		if this_keys.contains(Key::NumberBar) {
 			if let Some(text) = make_numbers(this_keys) {
@@ -349,7 +368,7 @@ impl<'a> OutputBuilder<'a> {
 	}
 }
 
-impl<D: Dict> Steno<D> {
+impl<D: Dict, W: WordList> Steno<D, W> {
 	fn run_action(&mut self, action: Action) -> Result<Output, SpecialAction> {
 		let mut backlog = std::mem::take(&mut self.backlog);
 		let mut output = OutputBuilder::new(&mut backlog, action.strokes, self.state);
@@ -392,7 +411,15 @@ impl<D: Dict> Steno<D> {
 
 				if !self.state.space {
 					already_appended = output.try_replace(
-						|before| apply_orthography_rules(before, text),
+						|before| {
+							let mut without_rules = [before, text].concat();
+							without_rules.make_ascii_lowercase();
+							if self.word_list.contains(&without_rules) {
+								return None;
+							}
+
+							apply_orthography_rules(before, text)
+						},
 						&mut self.state,
 					);
 				}

@@ -12,6 +12,9 @@ pub struct Args {
 	/// path to the dictionary JSON
 	#[argh(option, short = 'D', default = r#""dict.json".into()"#)]
 	pub dict: PathBuf,
+	/// path to the word list
+	#[argh(option, short = 'W', default = r#""words.txt".into()"#)]
+	pub word_list: PathBuf,
 	#[argh(subcommand)]
 	pub frontend: Frontend,
 }

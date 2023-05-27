@@ -19,18 +19,21 @@
 use crate::args::Frontend;
 use crate::dict::Dict;
 use crate::steno::Steno;
+use crate::word_list::WordList;
 
 mod args;
 mod dict;
 mod frontends;
 mod keys;
 mod steno;
+mod word_list;
 
 fn main() {
 	let args = args::load();
 
 	let dict = Dict::load(&args.dict);
-	let steno = Steno::new(dict);
+	let word_list = WordList::load(&args.word_list);
+	let steno = Steno::new(dict, word_list);
 
 	match args.frontend {
 		Frontend::InputMethod(args) => {
