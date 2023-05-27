@@ -3,9 +3,10 @@ use once_cell::sync::Lazy;
 use crate::dict::{Dict, Strokes};
 use crate::keys::Keys;
 use crate::steno::{Output, SpecialAction, Steno};
+use crate::word_list::WordList;
 
-fn steno_to_string(dict: &Dict, input: &[Keys]) -> String {
-	let mut steno = Steno::new(dict);
+fn steno_to_string(dict: &Dict, word_list: &WordList, input: &[Keys]) -> String {
+	let mut steno = Steno::new(dict, word_list);
 	let mut out = String::new();
 
 	for &keys in input {
@@ -34,6 +35,8 @@ fn steno_to_string(dict: &Dict, input: &[Keys]) -> String {
 
 static DICT: Lazy<Dict> =
 	Lazy::new(|| serde_json::from_str(include_str!("../../dict.json")).unwrap());
+
+static WORD_LIST: Lazy<WordList> = Lazy::new(|| include_str!("../../words.txt").parse().unwrap());
 
 const TESTS: &[(&str, &str)] = &[
 	// Basic
@@ -129,7 +132,7 @@ fn test() {
 
 	for &(raw_input, expected_output) in TESTS {
 		let input_strokes = raw_input.parse::<Strokes>().unwrap().0;
-		let actual_output = steno_to_string(&DICT, &input_strokes);
+		let actual_output = steno_to_string(&DICT, &WORD_LIST, &input_strokes);
 		let correct = actual_output == expected_output;
 		success &= correct;
 		if !correct {
