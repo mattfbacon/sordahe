@@ -116,7 +116,7 @@ const TESTS: &[(&str, &str)] = &[
 	("SELTD", "Settled"),
 	("SELT/D/TEFT", "Settled test"),
 	("SELT/D/*", ""),
-	("EU/SELT/D/*", "I"),
+	("TH/S/AEU/TEFT/SELT/D/*/*", "This is a"),
 ];
 
 #[test]
