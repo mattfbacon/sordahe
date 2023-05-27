@@ -313,22 +313,28 @@ impl<D: Dict> Steno<D> {
 		prev_was_glue: bool,
 	) -> Result<(), PloverCommand> {
 		match part {
-			EntryPart::Verbatim(text) => 'block: {
+			EntryPart::Verbatim(text) => {
 				if self.state.space {
 					output.append(" ");
-				} else {
+				}
+
+				let first_pos = output.append.len();
+				let mut already_appended = false;
+
+				if !self.state.space {
 					let before = Some(output.append.as_str())
 						.filter(|buf| !buf.is_empty())
 						.or(self.backlog.back().map(|event| &*event.text))
 						.unwrap_or("");
 					if let Some(combined) = apply_orthography_rules(before, text) {
 						output.replace(CharsOrBytes::for_str(before), &combined);
-						break 'block;
+						already_appended = true;
 					}
 				}
 
-				let first_pos = output.append.len();
-				output.append(text);
+				if !already_appended {
+					output.append(text);
+				}
 
 				if let Some(caps) = self.state.caps {
 					let first_len = output.append[first_pos..]
