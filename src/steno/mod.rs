@@ -10,6 +10,8 @@ mod orthography;
 #[cfg(test)]
 mod test;
 
+// Public API:
+
 pub trait Dict {
 	fn get(&self, keys: &[Keys]) -> Option<Entry>;
 	fn max_strokes(&self) -> usize;
@@ -31,47 +33,6 @@ impl<T: AsRef<crate::dict::Dict>> Dict for T {
 	fn max_strokes(&self) -> usize {
 		self.as_ref().max_strokes()
 	}
-}
-
-const BACKLOG_DEPTH: usize = 1000;
-
-#[derive(Debug, Clone, Copy)]
-struct InputState {
-	caps: Option<bool>,
-	space: bool,
-	carry_to_next: bool,
-	glue: bool,
-}
-
-impl InputState {
-	const INITIAL: Self = Self {
-		caps: Some(true),
-		space: false,
-		carry_to_next: false,
-		glue: false,
-	};
-}
-
-#[derive(Debug)]
-struct InputEvent {
-	strokes: Strokes,
-	text: String,
-	state_before: InputState,
-}
-
-#[derive(Debug)]
-pub struct Steno<D = crate::dict::Dict> {
-	dict: D,
-	state: InputState,
-	backlog: VecDeque<InputEvent>,
-}
-
-#[derive(Debug)]
-struct Action {
-	entry: Entry,
-	strokes: Strokes,
-	/// The number of backlog entries that must be deleted before applying the entry.
-	delete_before: usize,
 }
 
 #[derive(Debug)]
@@ -119,6 +80,64 @@ impl Output {
 		self.delete(old_len);
 		self.append(new);
 	}
+}
+
+impl<D: Dict> Steno<D> {
+	pub fn new(dict: D) -> Self {
+		Self {
+			dict,
+			state: InputState::INITIAL,
+			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
+		}
+	}
+
+	pub fn handle_keys(&mut self, keys: Keys) -> Result<Output, SpecialAction> {
+		let action = self.find_action(keys);
+		self.run_action(action)
+	}
+}
+
+// Implementation:
+
+const BACKLOG_DEPTH: usize = 1000;
+
+#[derive(Debug, Clone, Copy)]
+struct InputState {
+	caps: Option<bool>,
+	space: bool,
+	carry_to_next: bool,
+	glue: bool,
+}
+
+impl InputState {
+	const INITIAL: Self = Self {
+		caps: Some(true),
+		space: false,
+		carry_to_next: false,
+		glue: false,
+	};
+}
+
+#[derive(Debug)]
+struct InputEvent {
+	strokes: Strokes,
+	text: String,
+	state_before: InputState,
+}
+
+#[derive(Debug)]
+pub struct Steno<D = crate::dict::Dict> {
+	dict: D,
+	state: InputState,
+	backlog: VecDeque<InputEvent>,
+}
+
+#[derive(Debug)]
+struct Action {
+	entry: Entry,
+	strokes: Strokes,
+	/// The number of backlog entries that must be deleted before applying the entry.
+	delete_before: usize,
 }
 
 fn make_numbers(mut keys: Keys) -> Option<String> {
@@ -194,19 +213,6 @@ fn make_fallback_action(keys: Keys) -> Action {
 }
 
 impl<D: Dict> Steno<D> {
-	pub fn new(dict: D) -> Self {
-		Self {
-			dict,
-			state: InputState::INITIAL,
-			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
-		}
-	}
-
-	pub fn handle_keys(&mut self, keys: Keys) -> Result<Output, SpecialAction> {
-		let action = self.find_action(keys);
-		self.run_action(action)
-	}
-
 	fn find_action(&self, this_keys: Keys) -> Action {
 		if this_keys.contains(Key::NumberBar) {
 			if let Some(text) = make_numbers(this_keys) {
