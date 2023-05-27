@@ -120,6 +120,7 @@ const TESTS: &[(&str, &str)] = &[
 	("SELT/D/TEFT", "Settled test"),
 	("SELT/D/*", ""),
 	("TH/S/AEU/TEFT/SELT/D/*/*", "This is a"),
+	("PHAOET/G/PHAOET/G", "Meeting meeting"),
 	// Glue
 	("KP*", "x"),
 	("KP*/KP*/KP*", "xxx"),
