@@ -321,6 +321,20 @@ impl Output {
 	}
 }
 
+enum PreviousSource {
+	InProgress(String),
+	Backlog(InputEvent),
+}
+
+impl PreviousSource {
+	fn text(&self) -> &str {
+		match self {
+			Self::InProgress(text) => text,
+			Self::Backlog(event) => &event.text,
+		}
+	}
+}
+
 impl<D: Dict, W: WordList> Steno<D, W> {
 	fn delete_full_entry(&mut self) -> Option<InputEvent> {
 		let entry = self.backlog.pop_back();
@@ -359,6 +373,17 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		Some(text)
 	}
 
+	#[allow(clippy::manual_map /* symmetry */)]
+	fn remove_previous(&mut self) -> Option<PreviousSource> {
+		if let Some(text) = self.take_in_progress() {
+			Some(PreviousSource::InProgress(text))
+		} else if let Some(previous) = self.delete_full_entry() {
+			Some(PreviousSource::Backlog(previous))
+		} else {
+			None
+		}
+	}
+
 	fn run_action(&mut self, action: Action) -> Result<(), SpecialAction> {
 		assert!(self.backlog_entry_in_progress.is_empty());
 
@@ -380,27 +405,7 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 					self.run_verbatim(text);
 				}
 				EntryPart::Suffix(suffix) => {
-					enum PreviousSource {
-						InProgress(String),
-						Backlog(InputEvent),
-					}
-
-					impl PreviousSource {
-						fn text(&self) -> &str {
-							match self {
-								Self::InProgress(text) => text,
-								Self::Backlog(event) => &event.text,
-							}
-						}
-					}
-
-					let previous = if let Some(text) = self.take_in_progress() {
-						Some(PreviousSource::InProgress(text))
-					} else if let Some(previous) = self.delete_full_entry() {
-						Some(PreviousSource::Backlog(previous))
-					} else {
-						None
-					};
+					let previous = self.remove_previous();
 					self.state.space = false;
 
 					if let Some(mut previous) = previous {
