@@ -1,3 +1,4 @@
+use anyhow::{anyhow, ensure, Context as _};
 use wayland_client::protocol::wl_keyboard::KeyState;
 use wayland_client::protocol::wl_registry;
 use wayland_client::protocol::wl_seat::WlSeat;
@@ -55,7 +56,9 @@ impl App {
 				} = output;
 
 				// We want to delete words, but this isn't really possible as an input method, so we'll delete a single character instead.
-				let delete = (delete_words + delete.bytes()).try_into().unwrap();
+				let delete = (delete_words + delete.bytes())
+					.try_into()
+					.expect("deletion overflowed u32");
 				self.input.delete_surrounding_text(delete, 0);
 				self.input.commit_string(append);
 				self.input.commit(self.serial);
@@ -158,11 +161,13 @@ impl Dispatch<wl_registry::WlRegistry, ()> for NeededProxies {
 delegate_noop!(NeededProxies: ignore WlSeat);
 delegate_noop!(NeededProxies: ignore ZwpInputMethodManagerV2);
 
-struct PanicIfImeUnavailable;
+struct CheckIfImeAvailable {
+	available: bool,
+}
 
-impl Dispatch<ZwpInputMethodV2, ()> for PanicIfImeUnavailable {
+impl Dispatch<ZwpInputMethodV2, ()> for CheckIfImeAvailable {
 	fn event(
-		_state: &mut Self,
+		state: &mut Self,
 		_proxy: &ZwpInputMethodV2,
 		event: <ZwpInputMethodV2 as wayland_client::Proxy>::Event,
 		_data: &(),
@@ -170,13 +175,13 @@ impl Dispatch<ZwpInputMethodV2, ()> for PanicIfImeUnavailable {
 		_qhandle: &QueueHandle<Self>,
 	) {
 		if let zwp_input_method_v2::Event::Unavailable = event {
-			panic!("an IME is already registered");
+			state.available = false;
 		}
 	}
 }
 
-pub fn run(steno: Steno, InputMethodArgs {}: InputMethodArgs) {
-	let conn = Connection::connect_to_env().unwrap();
+pub fn run(steno: Steno, InputMethodArgs {}: InputMethodArgs) -> anyhow::Result<()> {
+	let conn = Connection::connect_to_env().context("connecting to Wayland server")?;
 	let display = conn.display();
 
 	let (manager, seat) = {
@@ -190,18 +195,26 @@ pub fn run(steno: Steno, InputMethodArgs {}: InputMethodArgs) {
 
 		display.get_registry(&handle, ());
 
-		queue.roundtrip(&mut needed).unwrap();
+		queue.roundtrip(&mut needed)?;
 
-		(needed.manager.unwrap(), needed.seat.unwrap())
+		let manager = needed
+			.manager
+			.ok_or_else(|| anyhow!("no zwp_input_method_manager_v2 found in registry"))?;
+		let seat = needed
+			.seat
+			.ok_or_else(|| anyhow!("no wl_seat found in registry"))?;
+		(manager, seat)
 	};
 
 	let input = {
-		let mut queue = conn.new_event_queue::<PanicIfImeUnavailable>();
+		let mut queue = conn.new_event_queue::<CheckIfImeAvailable>();
 		let handle = queue.handle();
 
 		let input = manager.get_input_method(&seat, &handle, ());
 
-		queue.roundtrip(&mut PanicIfImeUnavailable).unwrap();
+		let mut check = CheckIfImeAvailable { available: true };
+		queue.roundtrip(&mut check)?;
+		ensure!(check.available, "an IME is already registered");
 
 		input
 	};
@@ -222,12 +235,14 @@ pub fn run(steno: Steno, InputMethodArgs {}: InputMethodArgs) {
 		buffer: BoundedQueue::new(100),
 	};
 
-	queue.roundtrip(&mut app).unwrap();
+	queue.roundtrip(&mut app)?;
 
 	while !app.should_exit {
-		queue.blocking_dispatch(&mut app).unwrap();
+		queue.blocking_dispatch(&mut app)?;
 	}
 
 	grab.release();
-	queue.roundtrip(&mut app).unwrap();
+	queue.roundtrip(&mut app)?;
+
+	Ok(())
 }

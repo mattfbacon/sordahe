@@ -19,12 +19,14 @@
 use std::collections::HashMap;
 
 fn main() {
+	let raw =
+		std::fs::read_to_string("../dict.json").expect("reading dictionary from `../dict.json`");
 	let dict: HashMap<Box<str>, Box<str>> =
-		serde_json::from_str(&std::fs::read_to_string("../dict.json").unwrap()).unwrap();
+		serde_json::from_str(&raw).expect("deserializing dictionary JSON");
 
 	eprint!("> ");
 	for search in std::io::stdin().lines() {
-		let search = search.unwrap();
+		let search = search.expect("reading from stdin");
 		let mut entries = dict
 			.iter()
 			.filter(|(_stroke, text)| ***text == search)

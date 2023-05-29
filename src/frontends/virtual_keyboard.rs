@@ -2,6 +2,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::os::fd::AsRawFd;
 use std::time::Duration;
 
+use anyhow::{anyhow, Context as _};
 use memfd::MemfdOptions;
 use serialport::{SerialPortType, TTYPort as TtyPort};
 use wayland_client::protocol::wl_keyboard::{KeyState, KeymapFormat};
@@ -59,8 +60,8 @@ struct App;
 
 delegate_noop!(App: ZwpVirtualKeyboardV1);
 
-fn discover_device() -> String {
-	let ports = serialport::available_ports().unwrap();
+fn discover_device() -> anyhow::Result<String> {
+	let ports = serialport::available_ports().context("enumerating serial ports")?;
 	let (path, _) = ports
 		.into_iter()
 		.filter_map(|port| {
@@ -68,8 +69,8 @@ fn discover_device() -> String {
 			Some((port.port_name, ty))
 		})
 		.find(|(_name, ty)| ty.manufacturer.as_deref() == Some("Noll_Electronics_LLC"))
-		.expect("could not find Nolltronics device in available ports");
-	path
+		.ok_or_else(|| anyhow!("could not find Nolltronics device in available ports"))?;
+	Ok(path)
 }
 
 #[derive(Debug)]
@@ -80,12 +81,12 @@ struct GeminiDevice<I> {
 const BAUD: u32 = 9600;
 
 impl GeminiDevice<TtyPort> {
-	fn open(path: &str) -> Self {
+	fn open(path: &str) -> anyhow::Result<Self> {
 		let inner = serialport::new(path, BAUD)
 			.timeout(Duration::from_secs(u32::MAX.into()))
-			.open_native()
-			.unwrap();
-		Self { inner }
+			.open_native()?;
+
+		Ok(Self { inner })
 	}
 }
 
@@ -157,14 +158,15 @@ const GEMINI_LUT: [Option<Key>; 64] = [
 ];
 
 impl<I: Read> Iterator for GeminiDevice<I> {
-	type Item = Keys;
+	type Item = anyhow::Result<Keys>;
 
-	fn next(&mut self) -> Option<Keys> {
+	fn next(&mut self) -> Option<anyhow::Result<Keys>> {
 		let mut buf = [0u8; 8];
 		let res = self.inner.read_exact(&mut buf[2..]);
 		match res {
 			Err(error) if error.kind() == ErrorKind::UnexpectedEof => return None,
-			_ => res.unwrap(),
+			Err(error) => return Some(Err(error).context("IO error reading from device")),
+			Ok(..) => {}
 		}
 
 		assert!(buf[2] & 0x80 > 0);
@@ -175,7 +177,7 @@ impl<I: Read> Iterator for GeminiDevice<I> {
 			.filter(|bit| raw & (1 << bit) > 0)
 			.filter_map(|bit| GEMINI_LUT[bit as usize])
 			.collect();
-		Some(keys)
+		Some(Ok(keys))
 	}
 }
 
@@ -195,13 +197,16 @@ struct Keyboard {
 }
 
 impl Keyboard {
-	fn new(inner: ZwpVirtualKeyboardV1) -> Self {
+	fn new(inner: ZwpVirtualKeyboardV1) -> anyhow::Result<Self> {
 		let keymap_file = MemfdOptions::new()
 			.allow_sealing(true)
 			.close_on_exec(true)
 			.create("sordahe-keymap")
-			.unwrap();
-		keymap_file.as_file().write_all(KEYMAP.as_bytes()).unwrap();
+			.context("creating keymap memfd")?;
+		keymap_file
+			.as_file()
+			.write_all(KEYMAP.as_bytes())
+			.context("writing to memfd")?;
 
 		inner.keymap(
 			KeymapFormat::XkbV1 as u32,
@@ -209,7 +214,7 @@ impl Keyboard {
 			KEYMAP.len().try_into().unwrap(),
 		);
 
-		Self { inner, serial: 0 }
+		Ok(Self { inner, serial: 0 })
 	}
 
 	fn next_serial(&mut self) -> u32 {
@@ -287,12 +292,17 @@ impl Keyboard {
 	}
 }
 
-pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
-	let device_path = args.device.unwrap_or_else(discover_device);
+pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) -> anyhow::Result<()> {
+	let device_path = args.device.map_or_else(discover_device, Ok)?;
 	let StenoProtocol::Gemini = args.protocol;
-	let device = GeminiDevice::open(&device_path);
+	let device = GeminiDevice::open(&device_path).with_context(|| {
+		format!(
+			"opening device at {device_path:?} with protocol {:?}",
+			args.protocol,
+		)
+	})?;
 
-	let conn = Connection::connect_to_env().unwrap();
+	let conn = Connection::connect_to_env().context("connecting to Wayland server")?;
 	let display = conn.display();
 
 	let (manager, seat) = {
@@ -306,22 +316,29 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 
 		display.get_registry(&handle, ());
 
-		queue.roundtrip(&mut needed).unwrap();
+		queue.roundtrip(&mut needed)?;
 
-		(needed.manager.unwrap(), needed.seat.unwrap())
+		let manager = needed
+			.manager
+			.ok_or_else(|| anyhow!("no zwp_virtual_keyboard_manager_v1 found in registry"))?;
+		let seat = needed
+			.seat
+			.ok_or_else(|| anyhow!("no wl_seat found in registry"))?;
+		(manager, seat)
 	};
 
 	let mut queue = conn.new_event_queue::<App>();
 	let handle = queue.handle();
 
 	let keyboard = manager.create_virtual_keyboard(&seat, &handle, ());
-	let mut keyboard = Keyboard::new(keyboard);
+	let mut keyboard = Keyboard::new(keyboard).context("creating virtual keyboard")?;
 
-	queue.roundtrip(&mut App).unwrap();
+	queue.roundtrip(&mut App)?;
 
 	let mut buffer = BoundedQueue::new(100);
 
 	for keys in device {
+		let keys = keys.context("reading keys from device")?;
 		eprintln!("{keys:#}");
 		let output = steno.run_keys(keys).map(|()| steno.flush());
 
@@ -347,9 +364,11 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 
 				keyboard.type_str(&append);
 
-				queue.roundtrip(&mut App).unwrap();
+				queue.roundtrip(&mut App)?;
 			}
 			Err(SpecialAction::Quit) => break,
 		}
 	}
+
+	Ok(())
 }

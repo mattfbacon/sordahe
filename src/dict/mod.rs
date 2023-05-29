@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Context as _;
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
@@ -56,8 +57,9 @@ impl<'de> Deserialize<'de> for Dict {
 }
 
 impl Dict {
-	pub fn load(path: &Path) -> Self {
-		serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+	pub fn load(path: &Path) -> anyhow::Result<Self> {
+		let raw = std::fs::read_to_string(path).with_context(|| format!("reading from {path:?}"))?;
+		serde_json::from_str(&raw).context("deserializing dictionary from JSON")
 	}
 
 	pub fn get(&self, keys: &[Keys]) -> Option<&Entry> {

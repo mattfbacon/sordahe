@@ -16,6 +16,8 @@
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
+use anyhow::Context as _;
+
 use crate::args::Frontend;
 use crate::dict::Dict;
 use crate::steno::Steno;
@@ -30,19 +32,18 @@ mod keys;
 mod steno;
 mod word_list;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
 	let args = args::load();
 
-	let dict = Dict::load(&args.dict);
-	let word_list = WordList::load(&args.word_list);
+	let dict =
+		Dict::load(&args.dict).with_context(|| format!("loading dictionary from {:?}", args.dict))?;
+	let word_list = WordList::load(&args.word_list)
+		.with_context(|| format!("loading word list from {:?}", args.word_list))?;
 	let steno = Steno::new(dict, word_list);
 
 	match args.frontend {
-		Frontend::InputMethod(args) => {
-			crate::frontends::input_method::run(steno, args);
-		}
-		Frontend::VirtualKeyboard(args) => {
-			crate::frontends::virtual_keyboard::run(steno, args);
-		}
+		Frontend::InputMethod(args) => crate::frontends::input_method::run(steno, args),
+		Frontend::VirtualKeyboard(args) => crate::frontends::virtual_keyboard::run(steno, args),
 	}
+	.context("running frontend")
 }

@@ -25,7 +25,8 @@ pub fn apply_orthography_rules(first: &str, second: &str) -> Option<String> {
 			.copied()
 			.map(|(first_suffix, second_prefix, replacement)| {
 				(
-					Regex::new(&[first_suffix, "\0", second_prefix].concat()).unwrap(),
+					Regex::new(&[first_suffix, "\0", second_prefix].concat())
+						.expect("internal regex is broken"),
 					replacement,
 				)
 			})

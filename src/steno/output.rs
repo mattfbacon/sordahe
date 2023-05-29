@@ -45,7 +45,7 @@ fn floor_char_boundary_p(s: &str, index: usize) -> usize {
 			.rev()
 			.position(|index| s.is_char_boundary(index));
 
-		index - offset.unwrap()
+		index - offset.unwrap_or_else(|| unreachable!())
 	}
 }
 

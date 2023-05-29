@@ -5,21 +5,30 @@ use crate::keys::Keys;
 use crate::steno::Steno;
 use crate::word_list::WordList;
 
-fn steno_to_string(dict: &Dict, word_list: &WordList, input: &[Keys]) -> String {
+fn steno_to_string(dict: &Dict, word_list: &WordList, input: &[Keys]) -> Result<String, String> {
 	let mut steno = Steno::new(dict, word_list);
 
 	for &keys in input {
-		steno.run_keys(keys).unwrap();
+		steno
+			.run_keys(keys)
+			.map_err(|_| "unexpected special action")?;
 	}
 
 	let output = steno.flush();
-	assert_eq!(output.delete.bytes(), 0);
-	assert_eq!(output.delete_words, 0);
-	output.append
+	if output.delete.bytes() != 0 {
+		return Err(format!("{} bytes were deleted", output.delete.bytes()));
+	}
+	if output.delete_words != 0 {
+		return Err(format!("{} words were deleted", output.delete_words));
+	}
+
+	Ok(output.append)
 }
 
-static DICT: Lazy<Dict> =
-	Lazy::new(|| serde_json::from_str(include_str!("../../dict.json")).unwrap());
+static DICT: Lazy<Dict> = Lazy::new(|| {
+	serde_json::from_str(include_str!("../../dict.json"))
+		.expect("dictionary parse failed in test harness")
+});
 
 static WORD_LIST: Lazy<WordList> = Lazy::new(|| include_str!("../../words.txt").parse().unwrap());
 
@@ -118,9 +127,12 @@ fn test() {
 	let mut success = true;
 
 	for &(raw_input, expected_output) in TESTS {
-		let input_strokes = raw_input.parse::<Strokes>().unwrap().0;
+		let input_strokes = raw_input
+			.parse::<Strokes>()
+			.unwrap_or_else(|error| panic!("test strokes {raw_input:?} are invalid: {error}"))
+			.0;
 		let actual_output = steno_to_string(&DICT, &WORD_LIST, &input_strokes);
-		let correct = actual_output == expected_output;
+		let correct = actual_output.as_deref() == Ok(expected_output);
 		success &= correct;
 		if !correct {
 			println!("failed: input {raw_input:?}, expected output {expected_output:?}, actual output {actual_output:?}");

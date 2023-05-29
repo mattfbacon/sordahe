@@ -116,15 +116,17 @@ impl App {
 	fn new(_: &eframe::CreationContext<'_>) -> Self {
 		Self {
 			words: None,
-			open_words: FileDialog::open_file(Some(std::env::current_dir().unwrap()))
-				.show_new_folder(false),
+			open_words: FileDialog::open_file(Some(
+				std::env::current_dir().expect("getting current directory"),
+			))
+			.show_new_folder(false),
 			last_word_time: None,
 			wpm: RollingAverage::new(10),
 			player: Command::new("espeak")
 				.args(["-v", "mb/mb-us1"])
 				.stdin(Stdio::piped())
 				.spawn()
-				.unwrap(),
+				.expect("spawning espeak player (do you have espeak installed?)"),
 			was_correct: false,
 		}
 	}
@@ -200,14 +202,14 @@ impl eframe::App for App {
 							.as_mut()
 							.unwrap()
 							.write_all(words.current().as_bytes())
-							.unwrap();
+							.expect("writing to espeak");
 						self
 							.player
 							.stdin
 							.as_mut()
 							.unwrap()
 							.write_all(b"\n")
-							.unwrap();
+							.expect("writing to espeak");
 						if let Some(last) = self.last_word_time {
 							self.wpm.push(last.elapsed().as_secs_f32().recip())
 						}
