@@ -1,4 +1,4 @@
-use self::chars_or_bytes::CharsOrBytes;
+pub use self::chars_or_bytes::CharsOrBytes;
 use self::orthography::apply_orthography_rules;
 use crate::bounded_queue::BoundedQueue;
 use crate::dict::{Entry, EntryPart, PloverCommand, Strokes};
