@@ -23,6 +23,7 @@ use crate::word_list::WordList;
 
 mod args;
 mod bounded_queue;
+mod chars_or_bytes;
 mod dict;
 mod frontends;
 mod keys;
