@@ -1,67 +1,40 @@
+use once_cell::sync::Lazy;
+use regex::Regex;
+
 pub fn apply_orthography_rules(first: &str, second: &str) -> Option<String> {
-	const RULES: &[(&str, &str, &str)] = &[
+	const RULES_RAW: &[(&str, &str, &str)] = &[
 		("ic", "ly", "ically"),
 		("te", "ry", "tory"),
-		("t", "cy", "cy"),
-		("te", "cy", "cy"),
-		("sh", "s", "shes"),
-		("s", "s", "ses"),
-		("each", "s", "eaches"),
-		("eech", "s", "eeches"),
+		("te?", "cy", "cy"),
+		("s(h?)", "s", "s${1}es"),
+		("e([ae])?ch", "s", "e${1}ches"),
 		("y", "s", "ies"),
 		("y", "ed", "ied"),
 		("ie", "ing", "ying"),
 		("y", "ist", "ist"),
 		("y", "ful", "iful"),
 		("te", "en", "tten"),
-		("e", "en", "en"),
+		("e", "(en|ed|ing)", "$1"),
 		("ee", "e", "ee"),
-		("e", "ing", "ing"),
-		("at", "e", "atte"),
-		("ag", "e", "agge"),
-		("ab", "e", "abbe"),
-		("at", "i", "atti"),
-		("ag", "i", "aggi"),
-		("ab", "i", "abbi"),
-		("an", "i", "anni"),
-		("et", "e", "ette"),
-		("eg", "e", "egge"),
-		("eb", "e", "ebbe"),
-		("et", "i", "etti"),
-		("eg", "i", "eggi"),
-		("eb", "i", "ebbi"),
-		("en", "i", "enni"),
-		("it", "e", "itte"),
-		("ig", "e", "igge"),
-		("ib", "e", "ibbe"),
-		("it", "i", "itti"),
-		("ig", "i", "iggi"),
-		("ib", "i", "ibbi"),
-		("in", "i", "inni"),
-		("ot", "e", "otte"),
-		("og", "e", "ogge"),
-		("ob", "e", "obbe"),
-		("ot", "i", "otti"),
-		("og", "i", "oggi"),
-		("ob", "i", "obbi"),
-		("on", "i", "onni"),
-		("ut", "e", "utte"),
-		("ug", "e", "ugge"),
-		("ub", "e", "ubbe"),
-		("ut", "i", "utti"),
-		("ug", "i", "uggi"),
-		("ub", "i", "ubbi"),
-		("un", "i", "unni"),
-		("e", "ed", "ed"),
+		("([aeiou])([gbtnr])", "([ei])", "$1$2$2$3"),
 	];
 
-	for (first_suffix, second_prefix, replacement) in RULES {
-		if let Some(first) = first.strip_suffix(first_suffix) {
-			if let Some(second) = second.strip_prefix(second_prefix) {
-				return Some([first, replacement, second].concat());
-			}
-		}
-	}
+	static RULES: Lazy<Vec<(Regex, &str)>> = Lazy::new(|| {
+		RULES_RAW
+			.iter()
+			.copied()
+			.map(|(first_suffix, second_prefix, replacement)| {
+				(
+					Regex::new(&[first_suffix, "\0", second_prefix].concat()).unwrap(),
+					replacement,
+				)
+			})
+			.collect()
+	});
 
-	None
+	let concat = [first, "\0", second].concat();
+	RULES
+		.iter()
+		.find(|(regex, _replacement)| regex.is_match(&concat))
+		.map(|(regex, replacement)| regex.replace(&concat, *replacement).into_owned())
 }
