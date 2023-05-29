@@ -91,6 +91,7 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 
 const BACKLOG_DEPTH: usize = 1000;
 
+#[allow(clippy::struct_excessive_bools /* No Clippy, it's not a state machine, I promise. */)]
 #[derive(Debug, Clone, Copy)]
 struct InputState {
 	caps: bool,
