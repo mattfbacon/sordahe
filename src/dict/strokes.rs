@@ -6,7 +6,7 @@ use serde_with::DeserializeFromStr;
 
 use crate::keys::Keys;
 
-#[derive(Debug, PartialEq, Eq, Hash, DeserializeFromStr)]
+#[derive(Debug, Default, PartialEq, Eq, Hash, DeserializeFromStr)]
 pub struct Strokes(pub Vec<Keys>);
 
 impl Strokes {

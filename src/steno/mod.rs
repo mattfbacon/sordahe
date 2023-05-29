@@ -132,6 +132,8 @@ pub struct Steno<D = crate::dict::Dict, W = crate::word_list::WordList> {
 struct Action {
 	entry: Entry,
 	strokes: Strokes,
+	/// If `Some`, this should be run after `entry`.
+	removed_suffix: Option<Entry>,
 	/// The number of backlog entries that must be deleted before applying the entry.
 	delete_before: usize,
 }
@@ -200,12 +202,20 @@ fn make_simple_action(entry: Entry, keys: Keys) -> Action {
 	Action {
 		entry,
 		strokes: vec![keys].into(),
+		removed_suffix: None,
 		delete_before: 0,
 	}
 }
 
 fn make_fallback_action(keys: Keys) -> Action {
 	make_text_action(keys.to_string().into(), keys)
+}
+
+fn split_suffix(keys: Keys) -> Option<(Keys, Keys)> {
+	let suffix_keys = Key::G | Key::S2 | Key::D | Key::Z;
+
+	let suffix = keys & suffix_keys;
+	(!suffix.is_empty()).then(|| (keys & !suffix_keys, suffix))
 }
 
 impl<D: Dict, W: WordList> Steno<D, W> {
@@ -223,6 +233,9 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		}
 
 		let max_strokes = self.dict.max_strokes();
+
+		let split_suffix = split_suffix(this_keys)
+			.and_then(|(without_suffix, suffix)| Some((without_suffix, self.dict.get(&[suffix])?)));
 
 		// As a by-reference iterator, this is cheaply cloneable, which we take advantage of.
 		let events = self
@@ -244,15 +257,34 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			.enumerate()
 		{
 			let these_events = events.clone().skip(i);
-			let these_strokes = &all_strokes[skip..];
+			let these_strokes = &mut all_strokes[skip..];
+
 			if let Some(entry) = self.dict.get(these_strokes) {
 				all_strokes.drain(..skip);
 				return Action {
 					entry,
 					strokes: Strokes(all_strokes),
+					removed_suffix: None,
 					delete_before: these_events.len(),
 				};
 			}
+
+			if let Some((without_suffix, suffix)) = &split_suffix {
+				*these_strokes.last_mut().unwrap() = *without_suffix;
+				let entry = self.dict.get(these_strokes);
+				*these_strokes.last_mut().unwrap() = this_keys;
+
+				if let Some(entry) = entry {
+					all_strokes.drain(..skip);
+					return Action {
+						entry,
+						strokes: Strokes(all_strokes),
+						removed_suffix: Some(suffix.clone()),
+						delete_before: these_events.len(),
+					};
+				}
+			}
+
 			if let Some(event) = event {
 				skip += event.strokes.num_strokes();
 			}
@@ -311,6 +343,16 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		Ok(())
 	}
 
+	fn take_in_progress(&mut self) -> Option<String> {
+		if self.backlog_entry_in_progress.is_empty() {
+			return None;
+		}
+
+		let text = std::mem::take(&mut self.backlog_entry_in_progress);
+		self.output_in_progress.delete(CharsOrBytes::for_str(&text));
+		Some(text)
+	}
+
 	fn run_action(&mut self, action: Action) -> Result<(), SpecialAction> {
 		assert!(self.backlog_entry_in_progress.is_empty());
 
@@ -321,30 +363,58 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		let mut state_before = self.state;
 		let mut strokes = action.strokes;
 
-		for part in &*action.entry.0 {
+		let suffix_parts = action
+			.removed_suffix
+			.as_ref()
+			.into_iter()
+			.flat_map(|entry| &*entry.0);
+		for part in action.entry.0.iter().chain(suffix_parts) {
 			match part {
 				EntryPart::Verbatim(text) => {
 					self.run_verbatim(text);
 				}
 				EntryPart::Suffix(suffix) => {
-					assert!(self.backlog_entry_in_progress.is_empty());
-					let previous = self.delete_full_entry();
+					enum PreviousSource {
+						InProgress(String),
+						Backlog(InputEvent),
+					}
+
+					impl PreviousSource {
+						fn text(&self) -> &str {
+							match self {
+								Self::InProgress(text) => text,
+								Self::Backlog(event) => &event.text,
+							}
+						}
+					}
+
+					let previous = if let Some(text) = self.take_in_progress() {
+						Some(PreviousSource::InProgress(text))
+					} else if let Some(previous) = self.delete_full_entry() {
+						Some(PreviousSource::Backlog(previous))
+					} else {
+						None
+					};
 					self.state.space = false;
 
 					if let Some(mut previous) = previous {
-						state_before = previous.state_before;
-						previous.strokes.0.extend_from_slice(&strokes.0);
-						strokes = previous.strokes;
+						if let PreviousSource::Backlog(event) = &mut previous {
+							state_before = event.state_before;
+							// This weird dance lets us avoid inserting at the front.
+							event.strokes.0.extend_from_slice(&strokes.0);
+							strokes = std::mem::take(&mut event.strokes);
+						}
+						let previous_text = previous.text();
 
-						let mut without_rules = [previous.text.as_str(), suffix].concat();
+						let mut without_rules = [previous_text, suffix].concat();
 						without_rules.make_ascii_lowercase();
 						if let Some(combined) = (!self.word_list.contains(without_rules.trim()))
-							.then(|| apply_orthography_rules(&previous.text, suffix))
+							.then(|| apply_orthography_rules(previous_text, suffix))
 							.flatten()
 						{
 							self.run_verbatim(&combined);
 						} else {
-							self.run_verbatim(&previous.text);
+							self.run_verbatim(previous_text);
 							self.append(suffix);
 						}
 					} else {
