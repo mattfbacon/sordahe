@@ -12,6 +12,7 @@ use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboar
 use wayland_protocols_misc::zwp_virtual_keyboard_v1::client::zwp_virtual_keyboard_v1::ZwpVirtualKeyboardV1;
 
 use crate::args::{StenoProtocol, VirtualKeyboardArgs};
+use crate::bounded_queue::BoundedQueue;
 use crate::keys::{Key, Keys};
 use crate::steno::{Output, SpecialAction, Steno};
 
@@ -318,15 +319,22 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 
 	queue.roundtrip(&mut App).unwrap();
 
+	let mut buffer = BoundedQueue::new(100);
+
 	for keys in device {
 		eprintln!("{keys:#}");
 		let output = steno.run_keys(keys).map(|()| steno.flush());
+
 		match output {
-			Ok(Output {
-				delete_words,
-				delete,
-				append,
-			}) => {
+			Ok(mut output) => {
+				output.use_buffer(&mut buffer);
+
+				let Output {
+					delete_words,
+					delete,
+					append,
+				} = output;
+
 				for _ in 0..delete.chars() {
 					keyboard.backspace();
 				}

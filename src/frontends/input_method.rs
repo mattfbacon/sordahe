@@ -11,6 +11,7 @@ use wayland_protocols_misc::zwp_input_method_v2::client::zwp_input_method_v2::{
 };
 
 use crate::args::InputMethodArgs;
+use crate::bounded_queue::BoundedQueue;
 use crate::keys::{Key, Keys};
 use crate::steno::{Output, SpecialAction, Steno};
 
@@ -23,6 +24,7 @@ pub struct App {
 	keys_current: Keys,
 
 	steno: Steno,
+	buffer: BoundedQueue<u8>,
 }
 
 impl App {
@@ -43,11 +45,15 @@ impl App {
 
 	fn run_output(&mut self, output: Result<Output, SpecialAction>) {
 		match output {
-			Ok(Output {
-				delete_words,
-				delete,
-				append,
-			}) => {
+			Ok(mut output) => {
+				output.use_buffer(&mut self.buffer);
+
+				let Output {
+					delete_words,
+					delete,
+					append,
+				} = output;
+
 				// We want to delete words, but this isn't really possible as an input method, so we'll delete a single character instead.
 				let delete = (delete_words + delete.bytes()).try_into().unwrap();
 				self.input.delete_surrounding_text(delete, 0);
@@ -213,6 +219,7 @@ pub fn run(steno: Steno, InputMethodArgs {}: InputMethodArgs) {
 		keys_seen: Keys::empty(),
 
 		steno,
+		buffer: BoundedQueue::new(100),
 	};
 
 	queue.roundtrip(&mut app).unwrap();
