@@ -22,6 +22,7 @@ use crate::steno::Steno;
 use crate::word_list::WordList;
 
 mod args;
+mod bounded_queue;
 mod dict;
 mod frontends;
 mod keys;

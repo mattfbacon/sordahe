@@ -1,7 +1,6 @@
-use std::collections::VecDeque;
-
 use self::chars_or_bytes::CharsOrBytes;
 use self::orthography::apply_orthography_rules;
+use crate::bounded_queue::BoundedQueue;
 use crate::dict::{Entry, EntryPart, PloverCommand, Strokes};
 use crate::keys::{Key, Keys};
 
@@ -70,7 +69,7 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			dict,
 			word_list,
 			state: InputState::INITIAL,
-			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
+			backlog: BoundedQueue::new(BACKLOG_DEPTH),
 
 			output_in_progress: Output::default(),
 			backlog_entry_in_progress: String::new(),
@@ -116,7 +115,7 @@ struct InputEvent {
 	state_before: InputState,
 }
 
-type Backlog = VecDeque<InputEvent>;
+type Backlog = BoundedQueue<InputEvent>;
 
 #[derive(Debug)]
 pub struct Steno<D = crate::dict::Dict, W = crate::word_list::WordList> {
@@ -239,9 +238,7 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			.and_then(|(without_suffix, suffix)| Some((without_suffix, self.dict.get(&[suffix])?)));
 
 		// As a by-reference iterator, this is cheaply cloneable, which we take advantage of.
-		let events = self
-			.backlog
-			.range(self.backlog.len().saturating_sub(max_strokes)..);
+		let events = self.backlog.last_n(max_strokes);
 
 		let mut all_strokes: Vec<Keys> = events
 			.clone()
@@ -472,13 +469,10 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		}
 
 		if !self.backlog_entry_in_progress.is_empty() {
-			while self.backlog.len() >= BACKLOG_DEPTH {
-				self.backlog.pop_front();
-			}
 			// Not using `std::mem::take` here because we want to retain the allocated buffer for future pushes.
 			let text = self.backlog_entry_in_progress.clone();
 			self.backlog_entry_in_progress.clear();
-			self.backlog.push_back(InputEvent {
+			self.backlog.push(InputEvent {
 				strokes,
 				text,
 				state_before,
