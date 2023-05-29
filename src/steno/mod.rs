@@ -313,6 +313,12 @@ impl Output {
 	fn append(&mut self, text: &str) {
 		self.append += text;
 	}
+
+	fn clear(&mut self) {
+		self.append.clear();
+		self.delete = CharsOrBytes::default();
+		self.delete_words = 0;
+	}
 }
 
 impl<D: Dict, W: WordList> Steno<D, W> {
@@ -449,6 +455,12 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 						self.undo_stroke()?;
 					}
 					PloverCommand::Quit => return Err(SpecialAction::Quit),
+					PloverCommand::Reset => {
+						self.state = InputState::INITIAL;
+						self.backlog.clear();
+						self.backlog_entry_in_progress.clear();
+						self.output_in_progress.clear();
+					}
 				},
 			}
 		}

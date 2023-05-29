@@ -48,6 +48,7 @@ str_enum! {
 pub enum PloverCommand {
 	Backspace = "backspace",
 	Quit = "quit",
+	Reset = "reset",
 }
 }
 
