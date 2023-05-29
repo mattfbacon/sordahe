@@ -320,7 +320,7 @@ pub fn run(mut steno: Steno, args: VirtualKeyboardArgs) {
 
 	for keys in device {
 		eprintln!("{keys:#}");
-		let output = steno.handle_keys(keys);
+		let output = steno.run_keys(keys).map(|()| steno.flush());
 		match output {
 			Ok(Output {
 				delete_words,

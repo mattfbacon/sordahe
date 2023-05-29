@@ -2,35 +2,20 @@ use once_cell::sync::Lazy;
 
 use crate::dict::{Dict, Strokes};
 use crate::keys::Keys;
-use crate::steno::{Output, SpecialAction, Steno};
+use crate::steno::Steno;
 use crate::word_list::WordList;
 
 fn steno_to_string(dict: &Dict, word_list: &WordList, input: &[Keys]) -> String {
 	let mut steno = Steno::new(dict, word_list);
-	let mut out = String::new();
 
 	for &keys in input {
-		let output = steno.handle_keys(keys);
-		match output {
-			Ok(Output {
-				delete_words,
-				delete,
-				append,
-			}) => {
-				assert_eq!(delete_words, 0, "should never delete words");
-				out.truncate(
-					out
-						.len()
-						.checked_sub(delete.bytes())
-						.expect("deleted past the beginning"),
-				);
-				out += &append;
-			}
-			Err(SpecialAction::Quit) => panic!("got quit"),
-		}
+		steno.run_keys(keys).unwrap();
 	}
 
-	out
+	let output = steno.flush();
+	assert_eq!(output.delete.bytes(), 0);
+	assert_eq!(output.delete_words, 0);
+	output.append
 }
 
 static DICT: Lazy<Dict> =
@@ -45,6 +30,7 @@ const TESTS: &[(&str, &str)] = &[
 	("TEFT/-P/TEFT/-P/TEFT", "Test. Test. Test"),
 	// Chords
 	("HEL/HRO", "Hello"),
+	("HEL/HRO/*", "Hell"),
 	("HEL/HRO/HRA", "Hello la"),
 	// Numbers
 	("123", "123"),
@@ -118,8 +104,8 @@ const TESTS: &[(&str, &str)] = &[
 	("SELT/D", "Settled"),
 	("SELTD", "Settled"),
 	("SELT/D/TEFT", "Settled test"),
-	("SELT/D/*", ""),
-	("TH/S/AEU/TEFT/SELT/D/*/*", "This is a"),
+	("SELT/D/*", "Settle"),
+	("TH/S/AEU/TEFT/SELT/D/*/*/*", "This is a"),
 	("PHAOET/G/PHAOET/G", "Meeting meeting"),
 	// Glue
 	("KP*", "x"),

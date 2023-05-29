@@ -71,12 +71,19 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			word_list,
 			state: InputState::INITIAL,
 			backlog: VecDeque::with_capacity(BACKLOG_DEPTH),
+
+			output_in_progress: Output::default(),
+			backlog_entry_in_progress: String::new(),
 		}
 	}
 
-	pub fn handle_keys(&mut self, keys: Keys) -> Result<Output, SpecialAction> {
+	pub fn run_keys(&mut self, keys: Keys) -> Result<(), SpecialAction> {
 		let action = self.find_action(keys);
 		self.run_action(action)
+	}
+
+	pub fn flush(&mut self) -> Output {
+		std::mem::take(&mut self.output_in_progress)
 	}
 }
 
@@ -86,7 +93,7 @@ const BACKLOG_DEPTH: usize = 1000;
 
 #[derive(Debug, Clone, Copy)]
 struct InputState {
-	caps: Option<bool>,
+	caps: bool,
 	space: bool,
 	carry_to_next: bool,
 	glue: bool,
@@ -94,7 +101,7 @@ struct InputState {
 
 impl InputState {
 	const INITIAL: Self = Self {
-		caps: Some(true),
+		caps: true,
 		space: false,
 		carry_to_next: false,
 		glue: false,
@@ -116,6 +123,9 @@ pub struct Steno<D = crate::dict::Dict, W = crate::word_list::WordList> {
 	word_list: W,
 	state: InputState,
 	backlog: Backlog,
+
+	output_in_progress: Output,
+	backlog_entry_in_progress: String,
 }
 
 #[derive(Debug)]
@@ -203,7 +213,7 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		if this_keys.contains(Key::NumberBar) {
 			if let Some(text) = make_numbers(this_keys) {
 				let entry = if text.bytes().all(|b| b.is_ascii_digit()) {
-					vec![EntryPart::Glue, EntryPart::Verbatim(text.into())]
+					vec![EntryPart::Glue(text.into())]
 				} else {
 					vec![EntryPart::Verbatim(text.into())]
 				};
@@ -273,194 +283,155 @@ impl Output {
 	}
 }
 
-struct OutputBuilder<'a> {
-	backlog: &'a mut Backlog,
-	output: Output,
-	state_before: InputState,
-	strokes: Strokes,
-}
-
-impl<'a> OutputBuilder<'a> {
-	fn new(backlog: &'a mut Backlog, strokes: Strokes, input_state: InputState) -> Self {
-		Self {
-			backlog,
-			output: Output::default(),
-			state_before: input_state,
-			strokes,
-		}
-	}
-
-	fn delete_entry(&mut self, state: &mut InputState) -> Option<InputEvent> {
-		let prev = self.backlog.pop_back();
-
-		if let Some(prev) = &prev {
-			*state = prev.state_before;
-			self.state_before = prev.state_before;
-			self.output.delete(CharsOrBytes::for_str(&prev.text));
-		} else {
-			self.output.delete_words(1);
-		}
-
-		prev
-	}
-
-	fn try_replace(
-		&mut self,
-		replacer: impl FnOnce(&str) -> Option<String>,
-		state: &mut InputState,
-	) -> bool {
-		if !self.output.append.is_empty() {
-			if let Some(replace) = replacer(&self.output.append) {
-				self.output.append = replace;
-				true
-			} else {
-				false
-			}
-		} else if let Some(last) = self.backlog.back_mut() {
-			if let Some(replace) = replacer(&last.text) {
-				self.delete_entry(state);
-				self.output.append = replace;
-				true
-			} else {
-				false
-			}
-		} else {
-			false
-		}
-	}
-
-	fn append(&mut self, text: &str) {
-		self.output.append(text);
-	}
-
-	fn append_capsed(&mut self, text: &str, caps: Option<bool>) {
-		let first_pos = self.output.append.len();
-
-		self.output.append(text);
-		let text = &mut self.output.append[first_pos..];
-
-		if let Some(caps) = caps {
-			let first_len = text.chars().next().map_or(0, char::len_utf8);
-			let first = &mut text[..first_len];
-
-			if caps {
-				first.make_ascii_uppercase();
-			} else {
-				first.make_ascii_lowercase();
-			}
-		}
-	}
-
-	fn finish(self) -> Output {
-		while self.backlog.len() >= BACKLOG_DEPTH {
-			self.backlog.pop_front();
-		}
-
-		if !self.output.append.is_empty() {
-			self.backlog.push_back(InputEvent {
-				strokes: self.strokes,
-				text: self.output.append.clone(),
-				state_before: self.state_before,
-			});
-		}
-
-		self.output
-	}
-}
-
 impl<D: Dict, W: WordList> Steno<D, W> {
-	fn run_action(&mut self, action: Action) -> Result<Output, SpecialAction> {
-		let mut backlog = std::mem::take(&mut self.backlog);
-		let mut output = OutputBuilder::new(&mut backlog, action.strokes, self.state);
+	fn delete_full_entry(&mut self) -> Option<InputEvent> {
+		let entry = self.backlog.pop_back();
 
-		for _ in 0..action.delete_before {
-			output.delete_entry(&mut self.state);
+		if let Some(entry) = &entry {
+			self.state = entry.state_before;
+			let delete = CharsOrBytes::for_str(&entry.text);
+			self.output_in_progress.delete(delete);
+		} else {
+			self.output_in_progress.delete_words(1);
 		}
 
-		let glued = self.state.glue;
-		self.state.glue = false;
-
-		for part in &*action.entry.0 {
-			match self.run_part(part, &mut output, glued) {
-				Ok(()) => {}
-				Err(PloverCommand::Backspace) => {
-					output.delete_entry(&mut self.state);
-				}
-				Err(PloverCommand::Quit) => return Err(SpecialAction::Quit),
-			}
-		}
-
-		let output = output.finish();
-		self.backlog = backlog;
-		Ok(output)
+		entry
 	}
 
-	fn run_part(
-		&mut self,
-		part: &EntryPart,
-		output: &mut OutputBuilder<'_>,
-		prev_was_glue: bool,
-	) -> Result<(), PloverCommand> {
-		match part {
-			EntryPart::Verbatim(text) => {
-				if self.state.space {
-					output.append(" ");
-				}
+	fn undo_stroke(&mut self) -> Result<(), SpecialAction> {
+		// First delete an entire entry.
+		let Some(entry) = self.delete_full_entry() else { return Ok(()); };
+		let strokes = entry.strokes.0;
 
-				let mut already_appended = false;
-
-				if !self.state.space {
-					already_appended = output.try_replace(
-						|before| {
-							let mut without_rules = [before, text].concat();
-							without_rules.make_ascii_lowercase();
-							if self.word_list.contains(without_rules.trim()) {
-								return None;
-							}
-
-							apply_orthography_rules(before, text)
-						},
-						&mut self.state,
-					);
-				}
-
-				if !already_appended {
-					output.append_capsed(text, self.state.caps);
-				}
-
-				if !std::mem::replace(&mut self.state.carry_to_next, false) {
-					self.state.caps = None;
-					self.state.space = true;
-				}
-			}
-			EntryPart::SpecialPunct(punct) => {
-				output.append(punct.as_str());
-				self.state.space = true;
-				self.state.caps = if punct.is_sentence_end() {
-					Some(true)
-				} else {
-					None
-				};
-			}
-			EntryPart::SetCaps(set) => {
-				self.state.caps = Some(*set);
-			}
-			EntryPart::SetSpace(set) => {
-				self.state.space = *set;
-			}
-			EntryPart::CarryToNext => {
-				self.state.carry_to_next = true;
-			}
-			EntryPart::Glue => {
-				if prev_was_glue {
-					self.state.space = false;
-					self.state.caps = None;
-				}
-				self.state.glue = true;
-			}
-			EntryPart::PloverCommand(command) => return Err(*command),
+		// Then re-run all but the last stroke.
+		for &stroke in &strokes[..strokes.len() - 1] {
+			self.run_keys(stroke)?;
 		}
 
 		Ok(())
+	}
+
+	fn run_action(&mut self, action: Action) -> Result<(), SpecialAction> {
+		assert!(self.backlog_entry_in_progress.is_empty());
+
+		for _ in 0..action.delete_before {
+			self.delete_full_entry();
+		}
+
+		let mut state_before = self.state;
+		let mut strokes = action.strokes;
+
+		for part in &*action.entry.0 {
+			match part {
+				EntryPart::Verbatim(text) => {
+					self.run_verbatim(text);
+				}
+				EntryPart::Suffix(suffix) => {
+					assert!(self.backlog_entry_in_progress.is_empty());
+					let previous = self.delete_full_entry();
+					self.state.space = false;
+
+					if let Some(mut previous) = previous {
+						state_before = previous.state_before;
+						previous.strokes.0.extend_from_slice(&strokes.0);
+						strokes = previous.strokes;
+
+						let mut without_rules = [previous.text.as_str(), suffix].concat();
+						without_rules.make_ascii_lowercase();
+						if let Some(combined) = (!self.word_list.contains(without_rules.trim()))
+							.then(|| apply_orthography_rules(&previous.text, suffix))
+							.flatten()
+						{
+							self.run_verbatim(&combined);
+						} else {
+							self.run_verbatim(&previous.text);
+							self.append(suffix);
+						}
+					} else {
+						self.run_verbatim(suffix);
+					}
+				}
+				EntryPart::SpecialPunct(punct) => {
+					self.append(punct.as_str());
+					self.state.space = true;
+					self.state.caps = punct.is_sentence_end();
+				}
+				EntryPart::SetCaps(set) => {
+					self.state.caps = *set;
+				}
+				EntryPart::SetSpace(set) => {
+					self.state.space = *set;
+				}
+				EntryPart::CarryToNext => {
+					self.state.carry_to_next = true;
+				}
+				EntryPart::Glue(glued) => {
+					if self.state.glue {
+						self.append(glued);
+					} else {
+						self.run_verbatim(glued);
+					}
+					self.state.glue = true;
+				}
+				EntryPart::PloverCommand(command) => match command {
+					PloverCommand::Backspace => {
+						assert!(self.backlog_entry_in_progress.is_empty());
+						self.undo_stroke()?;
+					}
+					PloverCommand::Quit => return Err(SpecialAction::Quit),
+				},
+			}
+		}
+
+		if !self.backlog_entry_in_progress.is_empty() {
+			while self.backlog.len() >= BACKLOG_DEPTH {
+				self.backlog.pop_front();
+			}
+			// Not using `std::mem::take` here because we want to retain the allocated buffer for future pushes.
+			let text = self.backlog_entry_in_progress.clone();
+			self.backlog_entry_in_progress.clear();
+			self.backlog.push_back(InputEvent {
+				strokes,
+				text,
+				state_before,
+			});
+		}
+
+		Ok(())
+	}
+
+	fn append(&mut self, text: &str) {
+		self.output_in_progress.append(text);
+		self.backlog_entry_in_progress += text;
+	}
+
+	fn append_capsed(&mut self, text: &str, caps: bool) {
+		let pos = self.output_in_progress.append.len();
+
+		self.output_in_progress.append(text);
+		let text = &mut self.output_in_progress.append[pos..];
+
+		if caps {
+			let first_len = text.chars().next().map_or(0, char::len_utf8);
+			let first_text = &mut text[..first_len];
+			first_text.make_ascii_uppercase();
+		}
+
+		self.backlog_entry_in_progress += text;
+	}
+
+	fn run_verbatim(&mut self, text: &str) {
+		self.state.glue = false;
+
+		if self.state.space {
+			self.append(" ");
+		}
+
+		self.append_capsed(text, self.state.caps);
+
+		if !std::mem::replace(&mut self.state.carry_to_next, false) {
+			self.state.caps = false;
+			self.state.space = true;
+		}
 	}
 }

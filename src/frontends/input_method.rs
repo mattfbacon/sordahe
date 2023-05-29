@@ -36,7 +36,7 @@ impl App {
 		if self.keys_current.is_empty() && !self.keys_seen.is_empty() {
 			let keys = std::mem::take(&mut self.keys_seen);
 			eprintln!("{keys:#}");
-			let output = self.steno.handle_keys(keys);
+			let output = self.steno.run_keys(keys).map(|()| self.steno.flush());
 			self.run_output(output);
 		}
 	}
