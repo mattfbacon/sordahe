@@ -4,6 +4,11 @@ use super::{
 use crate::chars_or_bytes::CharsOrBytes;
 use crate::dict::{EntryPart, PloverCommand};
 
+enum PreviousSource {
+	InProgress,
+	Backlog,
+}
+
 impl<D: Dict, W: WordList> Steno<D, W> {
 	fn delete_full_entry(&mut self) -> Option<InputEvent> {
 		let entry = self.backlog.pop_back();
@@ -52,16 +57,16 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 	}
 
 	#[allow(clippy::manual_map /* symmetry */)]
-	fn remove_previous(&mut self) -> Option<String> {
+	fn remove_previous(&mut self) -> Option<(String, PreviousSource)> {
 		if let Some(text) = self.take_in_progress() {
-			Some(text)
+			Some((text, PreviousSource::InProgress))
 		} else if let Some(previous) = self.backlog.inner().back() {
 			let text = &previous.text;
 			self.output_in_progress.delete(CharsOrBytes::for_str(text));
 			// XXX This clone is unfortunate and technically unnecessary.
 			// If we could show Rust that this function only touches `*_in_progress` and `backlog`, we could return a `Cow` instead.
 			// This could probably be accomplished by grouping the aforementioned fields into some kind of "inner" structure.
-			Some(text.clone())
+			Some((text.clone(), PreviousSource::Backlog))
 		} else {
 			None
 		}
@@ -91,8 +96,10 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 					let previous = self.remove_previous();
 					self.state.space = false;
 
-					if let Some(previous_text) = previous {
-						replaced_previous = true;
+					if let Some((previous_text, previous_source)) = previous {
+						if matches!(previous_source, PreviousSource::Backlog) {
+							replaced_previous = true;
+						}
 
 						let mut without_rules = [previous_text.as_str(), suffix].concat();
 						without_rules.make_ascii_lowercase();

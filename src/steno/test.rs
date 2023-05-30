@@ -124,6 +124,8 @@ const TESTS: &[(&str, &str)] = &[
 	("TH/S/TPHOT/-PB/EURB/KWRAOU/-S", "This is not an issues"),
 	("TH/S/TPHOT/-PB/EURB/KWRAOU/-S/*", "This is not an issue"),
 	("TH/S/TPHOT/-PB/EURB/KWRAOU/-S/*/*", "This is not annish"),
+	("WEUL/ARLD", "Will articled"),
+	("WEUL/ARLD/*", "Will"),
 	// Glue
 	("KP*", "x"),
 	("KP*/KP*/KP*", "xxx"),
