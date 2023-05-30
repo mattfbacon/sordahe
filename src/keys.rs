@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter, Write as _};
+use std::fmt::{self, Debug, Display, Formatter, Write as _};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 use std::str::FromStr;
 
@@ -146,11 +146,11 @@ impl Key {
 
 impl Display for Key {
 	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
-		Keys::from(*self).fmt(formatter)
+		Display::fmt(&Keys::from(*self), formatter)
 	}
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Keys(u32);
 
 impl Keys {
@@ -432,7 +432,7 @@ impl Display for Keys {
 				if needs_dash {
 					formatter.write_str("-")?;
 				}
-				key.to_char().fmt(formatter)?;
+				formatter.write_char(key.to_char())?;
 			}
 		}
 		Ok(())
@@ -444,6 +444,22 @@ fn test_display() {
 	assert_eq!((Key::S | Key::S2).to_string(), "SS");
 	assert_eq!((Key::S2).to_string(), "-S");
 	assert_eq!((Key::A | Key::O | Key::S2).to_string(), "AOS");
+}
+
+impl Debug for Keys {
+	fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+		formatter.write_str("Keys(")?;
+		let mut entries = self.into_iter();
+		if let Some(first) = entries.next() {
+			Debug::fmt(&first, formatter)?;
+		}
+		for rest in entries {
+			formatter.write_str(" | ")?;
+			Debug::fmt(&rest, formatter)?;
+		}
+		formatter.write_str(")")?;
+		Ok(())
+	}
 }
 
 impl FromIterator<Key> for Keys {
