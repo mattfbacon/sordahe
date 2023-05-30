@@ -70,6 +70,9 @@ impl InputState {
 #[derive(Debug)]
 struct InputEvent {
 	strokes: Strokes,
+	/// This is only used for suffixes, because the suffix combined with the previous text may require replacing the previous text, but they can't be grouped into a single `Strokes` because it will interfere with multi-stroke resolution.
+	/// If this field is `true`, the text from the previous entry in the backlog should be re-appended if this entry is deleted.
+	replaced_previous: bool,
 	text: String,
 	state_before: InputState,
 }

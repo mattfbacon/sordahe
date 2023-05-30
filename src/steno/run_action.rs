@@ -4,20 +4,6 @@ use super::{
 use crate::chars_or_bytes::CharsOrBytes;
 use crate::dict::{EntryPart, PloverCommand};
 
-enum PreviousSource {
-	InProgress(String),
-	Backlog(InputEvent),
-}
-
-impl PreviousSource {
-	fn text(&self) -> &str {
-		match self {
-			Self::InProgress(text) => text,
-			Self::Backlog(event) => &event.text,
-		}
-	}
-}
-
 impl<D: Dict, W: WordList> Steno<D, W> {
 	fn delete_full_entry(&mut self) -> Option<InputEvent> {
 		let entry = self.backlog.pop_back();
@@ -26,6 +12,14 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			self.state = entry.state_before;
 			let delete = CharsOrBytes::for_str(&entry.text);
 			self.output_in_progress.delete(delete);
+
+			// When an entry is removed, `replaced_previous` indicates whether the previous entry's text should be re-appended.
+			// However, if there are multiple strokes in this entry, then the "previous" entry is really a previous iteration of _this_ entry, so the _actual_ previous entry should not be re-appended.
+			if entry.replaced_previous && entry.strokes.num_strokes() == 1 {
+				if let Some(previous) = self.backlog.inner().back() {
+					self.output_in_progress.append(&previous.text);
+				}
+			}
 		} else {
 			self.output_in_progress.delete_words(1);
 		}
@@ -39,7 +33,8 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 		let strokes = entry.strokes.0;
 
 		// Then re-run all but the last stroke.
-		for &stroke in &strokes[..strokes.len() - 1] {
+		let redo = &strokes[..strokes.len() - 1];
+		for &stroke in redo {
 			self.run_keys(stroke)?;
 		}
 
@@ -57,11 +52,16 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 	}
 
 	#[allow(clippy::manual_map /* symmetry */)]
-	fn remove_previous(&mut self) -> Option<PreviousSource> {
+	fn remove_previous(&mut self) -> Option<String> {
 		if let Some(text) = self.take_in_progress() {
-			Some(PreviousSource::InProgress(text))
-		} else if let Some(previous) = self.delete_full_entry() {
-			Some(PreviousSource::Backlog(previous))
+			Some(text)
+		} else if let Some(previous) = self.backlog.inner().back() {
+			let text = &previous.text;
+			self.output_in_progress.delete(CharsOrBytes::for_str(text));
+			// XXX This clone is unfortunate and technically unnecessary.
+			// If we could show Rust that this function only touches `*_in_progress` and `backlog`, we could return a `Cow` instead.
+			// This could probably be accomplished by grouping the aforementioned fields into some kind of "inner" structure.
+			Some(text.clone())
 		} else {
 			None
 		}
@@ -74,8 +74,8 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			self.delete_full_entry();
 		}
 
-		let mut state_before = self.state;
-		let mut strokes = action.strokes;
+		let state_before = self.state;
+		let mut replaced_previous = false;
 
 		let suffix_parts = action
 			.removed_suffix
@@ -91,24 +91,18 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 					let previous = self.remove_previous();
 					self.state.space = false;
 
-					if let Some(mut previous) = previous {
-						if let PreviousSource::Backlog(event) = &mut previous {
-							state_before = event.state_before;
-							// This weird dance lets us avoid inserting at the front.
-							event.strokes.0.extend_from_slice(&strokes.0);
-							strokes = std::mem::take(&mut event.strokes);
-						}
-						let previous_text = previous.text();
+					if let Some(previous_text) = previous {
+						replaced_previous = true;
 
-						let mut without_rules = [previous_text, suffix].concat();
+						let mut without_rules = [previous_text.as_str(), suffix].concat();
 						without_rules.make_ascii_lowercase();
 						if let Some(combined) = (!self.word_list.contains(without_rules.trim()))
-							.then(|| apply_orthography_rules(previous_text, suffix))
+							.then(|| apply_orthography_rules(&previous_text, suffix))
 							.flatten()
 						{
 							self.run_verbatim(&combined);
 						} else {
-							self.run_verbatim(previous_text);
+							self.run_verbatim(&previous_text);
 							self.append(suffix);
 						}
 					} else {
@@ -158,7 +152,8 @@ impl<D: Dict, W: WordList> Steno<D, W> {
 			let text = self.backlog_entry_in_progress.clone();
 			self.backlog_entry_in_progress.clear();
 			self.backlog.push(InputEvent {
-				strokes,
+				strokes: action.strokes,
+				replaced_previous,
 				text,
 				state_before,
 			});
