@@ -26,6 +26,11 @@ In either mode, the program loads the dictionary from `dict.json` in the current
 
 `sorda'e` means "many presses" in Lojban.
 
+## Credits
+
+The dictionary comes from Plover, extracted from the web-app.
+The word list comes from <https://github.com/dolph/dictionary>, specifically `enable1.txt`.
+
 ## License
 
 AGPL-3.0-or-later
