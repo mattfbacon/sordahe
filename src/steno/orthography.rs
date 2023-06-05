@@ -16,7 +16,7 @@ pub fn apply_orthography_rules(first: &str, second: &str) -> Option<String> {
 		("te", "en", "tten"),
 		("e", "(en|ed|ing)", "$1"),
 		("ee", "e", "ee"),
-		("([aeiou])([gbtnr])", "([ei])", "$1$2$2$3"),
+		("([aeiou])([gbtnrl])", "([ei])", "$1$2$2$3"),
 	];
 
 	static RULES: Lazy<Vec<(Regex, &str)>> = Lazy::new(|| {
