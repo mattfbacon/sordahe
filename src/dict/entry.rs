@@ -166,24 +166,24 @@ macro_rules! push_verbatim {
 }
 
 fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
-	'singles: {
-		let part = match inner {
-			">" => Part::SetCaps(false),
-			"-|" => Part::SetCaps(true),
-			"^" => Part::SetSpace(false),
-			" " => Part::Verbatim(" ".into()),
-			"~|" => Part::CarryToNext,
-			_ => break 'singles,
-		};
-		out.push(part);
-		return Ok(());
-	}
+	const AFFIXES: &[(&str, Part)] = &[
+		(">", Part::SetCaps(false)),
+		("-|", Part::SetCaps(true)),
+		("^", Part::SetSpace(false)),
+		("~|", Part::CarryToNext),
+	];
+
+	let mut is_pointless = true;
 
 	'precheck: {
 		let part = if let Some(command) = inner.strip_prefix("PLOVER:") {
 			Part::PloverCommand(command.parse()?)
+		} else if let Some(glued) = inner.strip_prefix('&') {
+			Part::Glue(unescape(glued)?)
 		} else if let Ok(punct) = inner.parse::<SpecialPunct>() {
 			Part::SpecialPunct(punct)
+		} else if inner == " " {
+			Part::SetSpace(true)
 		} else {
 			break 'precheck;
 		};
@@ -192,24 +192,66 @@ fn parse_special(out: &mut Vec<Part>, inner: &str) -> Result<(), ParseError> {
 		return Ok(());
 	}
 
-	if let Some(glued) = inner.strip_prefix('&') {
-		out.push(Part::Glue(unescape(glued)?));
-		return Ok(());
+	let mut rest = inner;
+
+	loop {
+		let mut done = true;
+
+		for (pat, part) in AFFIXES {
+			if let Some(new_rest) = rest.strip_prefix(pat) {
+				done = false;
+				out.push(part.clone());
+				rest = new_rest;
+				is_pointless = false;
+			}
+		}
+
+		if done {
+			break;
+		}
 	}
 
-	let (inner, set_space_false_after) = inner
-		.strip_suffix('^')
-		.filter(|rest| rest.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
-		.map_or((inner, false), |inner| (inner, true));
-
-	out.push(if let Some(suffix) = inner.strip_prefix('^') {
-		Part::Suffix(unescape(suffix)?)
+	let suffix = if out
+		.last()
+		.map_or(false, |last| matches!(last, Part::SetSpace(false)))
+	{
+		out.pop();
+		true
 	} else {
-		Part::Verbatim(unescape(inner)?)
-	});
+		false
+	};
 
-	if set_space_false_after {
-		out.push(Part::SetSpace(false));
+	let suffix_start = out.len();
+
+	loop {
+		let mut done = true;
+
+		for (pat, part) in AFFIXES {
+			if let Some(new_rest) = rest
+				.strip_suffix(pat)
+				.filter(|new_rest| new_rest.bytes().rev().take_while(|&b| b == b'\\').count() % 2 == 0)
+			{
+				done = false;
+				out.push(part.clone());
+				rest = new_rest;
+				is_pointless = false;
+			}
+		}
+
+		if done {
+			break;
+		}
+	}
+
+	if !rest.is_empty() {
+		let ctor = if suffix { Part::Suffix } else { Part::Verbatim };
+		out.push(ctor(unescape(rest)?));
+	}
+
+	out[suffix_start..].reverse();
+
+	if is_pointless {
+		return Err(ParseError::PointlessBrackets(inner.into()));
 	}
 
 	Ok(())
@@ -266,6 +308,14 @@ fn test_parse_entry() {
 	assert_eq!(
 		&r"{^\\\\\^}".parse::<Entry>().unwrap().0 as &[_],
 		&[Part::Suffix(r"\\^".into())],
+	);
+	assert_eq!(
+		&r"{ }".parse::<Entry>().unwrap().0 as &[_],
+		&[Part::SetSpace(true)],
+	);
+	assert_eq!(
+		&r"{^ ^}".parse::<Entry>().unwrap().0 as &[_],
+		&[Part::Suffix(" ".into()), Part::SetSpace(false)],
 	);
 }
 
